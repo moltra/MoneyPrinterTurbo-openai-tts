@@ -1116,6 +1116,139 @@ def is_gemini_voice(voice_name: str):
     return voice_name.startswith("gemini:")
 
 
+def is_openai_style_tts_voice(voice_name: str):
+    return voice_name.startswith("openai:")
+
+
+def _normalize_openai_style_tts_endpoint(base_url: str) -> str:
+    base_url = (base_url or "").strip()
+    if not base_url:
+        base_url = "https://api.openai.com/v1"
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/audio/speech"):
+        return base_url
+    if base_url.endswith("/v1"):
+        return f"{base_url}/audio/speech"
+    return f"{base_url}/v1/audio/speech"
+
+
+def _build_submaker_from_audio_file(text: str, audio_file: str) -> SubMaker:
+    text = (text or "").strip()
+    sub_maker = SubMaker()
+    audio_clip = AudioFileClip(audio_file)
+    audio_duration_seconds = float(audio_clip.duration or 0)
+    audio_clip.close()
+    audio_duration_100ns = int(audio_duration_seconds * 10_000_000)
+    sentences = utils.split_string_by_punctuations(text)
+    if not sentences:
+        sub_maker.subs = [text]
+        sub_maker.offset = [(0, audio_duration_100ns)]
+        return sub_maker
+
+    total_chars = sum(len(s) for s in sentences if s)
+    if total_chars <= 0:
+        sub_maker.subs = [text]
+        sub_maker.offset = [(0, audio_duration_100ns)]
+        return sub_maker
+
+    char_duration = audio_duration_100ns / total_chars
+    current_offset = 0
+    for sentence in sentences:
+        sentence = (sentence or "").strip()
+        if not sentence:
+            continue
+        sentence_duration = int(len(sentence) * char_duration)
+        sub_maker.subs.append(sentence)
+        sub_maker.offset.append((current_offset, current_offset + sentence_duration))
+        current_offset += sentence_duration
+    if sub_maker.offset:
+        last_start, _last_end = sub_maker.offset[-1]
+        sub_maker.offset[-1] = (last_start, audio_duration_100ns)
+    return sub_maker
+
+
+def openai_style_tts(
+    text: str,
+    voice_name: str,
+    voice_rate: float,
+    voice_file: str,
+    voice_volume: float = 1.0,
+) -> Union[SubMaker, None]:
+    text = (text or "").strip()
+    if not text:
+        logger.error("openai style tts failed: empty text")
+        return None
+
+    provider_base_url = config.app.get("openai_tts_base_url", "").strip()
+    if not provider_base_url:
+        provider_base_url = config.app.get("openai_base_url", "").strip()
+    url = _normalize_openai_style_tts_endpoint(provider_base_url)
+
+    api_key = (
+        config.app.get("openai_tts_api_key", "").strip()
+        or config.app.get("openai_api_key", "").strip()
+        or os.getenv("OPENAI_API_KEY", "").strip()
+    )
+    if not api_key:
+        logger.error("openai style tts failed: api_key is not set")
+        return None
+
+    model = config.app.get("openai_tts_model_name", "").strip() or "tts-1"
+
+    voice_value = voice_name
+    if is_openai_style_tts_voice(voice_value):
+        voice_value = voice_value[len("openai:") :].strip()
+    voice_value = voice_value.strip()
+    if ":" in voice_value:
+        possible_model, possible_voice = voice_value.split(":", 1)
+        if possible_model and possible_voice:
+            model = possible_model.strip()
+            voice_value = possible_voice.strip()
+
+    if not voice_value:
+        voice_value = config.app.get("openai_tts_voice", "").strip() or "alloy"
+
+    payload = {
+        "model": model,
+        "input": text,
+        "voice": voice_value,
+        "response_format": "mp3",
+        "speed": float(voice_rate or 1.0),
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    for i in range(3):
+        try:
+            logger.info(
+                f"start openai style tts, model: {model}, voice: {voice_value}, try: {i + 1}"
+            )
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                proxies=config.proxy,
+                verify=False,
+                timeout=(30, 240),
+            )
+            if response.status_code != 200:
+                logger.error(
+                    f"openai style tts failed with status code {response.status_code}: {response.text}"
+                )
+                continue
+
+            with open(voice_file, "wb") as f:
+                f.write(response.content)
+
+            return _build_submaker_from_audio_file(text=text, audio_file=voice_file)
+        except Exception as e:
+            logger.error(f"openai style tts failed: {str(e)}")
+    return None
+
+
 def tts(
     text: str,
     voice_name: str,
@@ -1123,8 +1256,13 @@ def tts(
     voice_file: str,
     voice_volume: float = 1.0,
 ) -> Union[SubMaker, None]:
+    if config.app.get("tts_provider", "").strip().lower() in {"openai", "openai_style", "openai-tts"}:
+        return openai_style_tts(text, voice_name, voice_rate, voice_file, voice_volume)
+
     if is_azure_v2_voice(voice_name):
         return azure_tts_v2(text, voice_name, voice_file)
+    elif is_openai_style_tts_voice(voice_name):
+        return openai_style_tts(text, voice_name, voice_rate, voice_file, voice_volume)
     elif is_siliconflow_voice(voice_name):
         # 从voice_name中提取模型和声音
         # 格式: siliconflow:model:voice-Gender
@@ -1265,70 +1403,8 @@ def siliconflow_tts(
                 with open(voice_file, "wb") as f:
                     f.write(response.content)
 
-                # 创建一个空的SubMaker对象
-                sub_maker = SubMaker()
-
-                # 获取音频文件的实际长度
-                try:
-                    # 尝试使用moviepy获取音频长度
-                    from moviepy import AudioFileClip
-
-                    audio_clip = AudioFileClip(voice_file)
-                    audio_duration = audio_clip.duration
-                    audio_clip.close()
-
-                    # 将音频长度转换为100纳秒单位（与edge_tts兼容）
-                    audio_duration_100ns = int(audio_duration * 10000000)
-
-                    # 使用文本分割来创建更准确的字幕
-                    # 将文本按标点符号分割成句子
-                    sentences = utils.split_string_by_punctuations(text)
-
-                    if sentences:
-                        # 计算每个句子的大致时长（按字符数比例分配）
-                        total_chars = sum(len(s) for s in sentences)
-                        char_duration = (
-                            audio_duration_100ns / total_chars if total_chars > 0 else 0
-                        )
-
-                        current_offset = 0
-                        for sentence in sentences:
-                            if not sentence.strip():
-                                continue
-
-                            # 计算当前句子的时长
-                            sentence_chars = len(sentence)
-                            sentence_duration = int(sentence_chars * char_duration)
-
-                            # 添加到SubMaker
-                            sub_maker.subs.append(sentence)
-                            sub_maker.offset.append(
-                                (current_offset, current_offset + sentence_duration)
-                            )
-
-                            # 更新偏移量
-                            current_offset += sentence_duration
-                    else:
-                        # 如果无法分割，则使用整个文本作为一个字幕
-                        sub_maker.subs = [text]
-                        sub_maker.offset = [(0, audio_duration_100ns)]
-
-                except Exception as e:
-                    logger.warning(f"Failed to create accurate subtitles: {str(e)}")
-                    # 回退到简单的字幕
-                    sub_maker.subs = [text]
-                    # 使用音频文件的实际长度，如果无法获取，则假设为10秒
-                    sub_maker.offset = [
-                        (
-                            0,
-                            audio_duration_100ns
-                            if "audio_duration_100ns" in locals()
-                            else 10000000,
-                        )
-                    ]
-
+                sub_maker = _build_submaker_from_audio_file(text=text, audio_file=voice_file)
                 logger.success(f"siliconflow tts succeeded: {voice_file}")
-                print("s", sub_maker.subs, sub_maker.offset)
                 return sub_maker
             else:
                 logger.error(
@@ -1456,7 +1532,6 @@ def gemini_tts(
         SubMaker对象或None
     """
     import base64
-    import json
     import io
     from pydub import AudioSegment
     import google.generativeai as genai
