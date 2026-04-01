@@ -51,9 +51,11 @@ RUN sed -i '/<policy domain="path" rights="none" pattern="@\*"/d' /etc/ImageMagi
 COPY requirements.txt ./
 
 # Install Python dependencies with domestic mirrors first and retry logic
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com --retries 3 --timeout 60 -r requirements.txt || \
-    pip install --no-cache-dir -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/ --trusted-host mirrors.tuna.tsinghua.edu.cn --retries 3 --timeout 60 -r requirements.txt || \
-    pip install --no-cache-dir --retries 3 --timeout 60 -r requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    imagemagick \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Now copy the rest of the codebase into the image
 COPY . .
