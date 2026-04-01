@@ -2,12 +2,12 @@
 FROM python:3.11-slim-bullseye
 
 # Set the working directory in the container
-WORKDIR /MoneyPrinterTurbo
+WORKDIR /MoneyPrinterTurbo-openai-tts
 
-# 设置/MoneyPrinterTurbo目录权限为777
-RUN chmod 777 /MoneyPrinterTurbo
+# 设置/MoneyPrinterTurbo-openai-tts目录权限为777
+RUN mkdir -p /MoneyPrinterTurbo-openai-tts && chmod 777 /MoneyPrinterTurbo-openai-tts
 
-ENV PYTHONPATH="/MoneyPrinterTurbo"
+ENV PYTHONPATH="/MoneyPrinterTurbo-openai-tts"
 
 # Install system dependencies with domestic mirrors first for stability
 RUN echo "deb http://mirrors.aliyun.com/debian bullseye main" > /etc/apt/sources.list && \
@@ -50,12 +50,9 @@ RUN sed -i '/<policy domain="path" rights="none" pattern="@\*"/d' /etc/ImageMagi
 # Copy only the requirements.txt first to leverage Docker cache
 COPY requirements.txt ./
 
-# Install Python dependencies with domestic mirrors first and retry logic
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    imagemagick \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python dependencies
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Now copy the rest of the codebase into the image
 COPY . .
@@ -64,13 +61,13 @@ COPY . .
 EXPOSE 8501
 
 # Command to run the application
-CMD ["streamlit", "run", "./webui/Main.py","--browser.serverAddress=127.0.0.1","--server.enableCORS=True","--browser.gatherUsageStats=False"]
+CMD ["streamlit", "run", "./webui/Main.py","--server.address=0.0.0.0","--server.enableCORS=True","--browser.gatherUsageStats=False"]
 
 # 1. Build the Docker image using the following command
-# docker build -t moneyprinterturbo .
+# docker build -t moneyprinterturbo-openai-tts .
 
 # 2. Run the Docker container using the following command
 ## For Linux or MacOS:
-# docker run -v $(pwd)/config.toml:/MoneyPrinterTurbo/config.toml -v $(pwd)/storage:/MoneyPrinterTurbo/storage -p 8501:8501 moneyprinterturbo
+# docker run -v $(pwd)/config.toml:/MoneyPrinterTurbo-openai-tts/config.toml -v $(pwd)/storage:/MoneyPrinterTurbo-openai-tts/storage -p 8501:8501 moneyprinterturbo-openai-tts
 ## For Windows:
-# docker run -v ${PWD}/config.toml:/MoneyPrinterTurbo/config.toml -v ${PWD}/storage:/MoneyPrinterTurbo/storage -p 8501:8501 moneyprinterturbo
+# docker run -v ${PWD}/config.toml:/MoneyPrinterTurbo-openai-tts/config.toml -v ${PWD}/storage:/MoneyPrinterTurbo-openai-tts/storage -p 8501:8501 moneyprinterturbo-openai-tts
