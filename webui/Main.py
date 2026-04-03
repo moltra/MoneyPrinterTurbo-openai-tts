@@ -587,7 +587,11 @@ with middle_panel:
 
         selected_index = st.selectbox(
             tr("Video Concat Mode"),
-            index=1,
+            index=[m[1] for m in video_concat_modes].index(
+                config.ui.get("video_concat_mode", "random")
+            )
+            if config.ui.get("video_concat_mode", "random") in [m[1] for m in video_concat_modes]
+            else 1,
             options=range(
                 len(video_concat_modes)
             ),  # Use the index as the internal option value
@@ -598,6 +602,7 @@ with middle_panel:
         params.video_concat_mode = VideoConcatMode(
             video_concat_modes[selected_index][1]
         )
+        config.ui["video_concat_mode"] = params.video_concat_mode.value
 
         # 视频转场模式
         video_transition_modes = [
@@ -612,11 +617,17 @@ with middle_panel:
             tr("Video Transition Mode"),
             options=range(len(video_transition_modes)),
             format_func=lambda x: video_transition_modes[x][0],
-            index=0,
+            index=[m[1] for m in video_transition_modes].index(
+                config.ui.get("video_transition_mode", VideoTransitionMode.none.value)
+            )
+            if config.ui.get("video_transition_mode", VideoTransitionMode.none.value)
+            in [m[1] for m in video_transition_modes]
+            else 0,
         )
         params.video_transition_mode = VideoTransitionMode(
             video_transition_modes[selected_index][1]
         )
+        config.ui["video_transition_mode"] = params.video_transition_mode.value
 
         video_aspect_ratios = [
             (tr("Portrait"), VideoAspect.portrait.value),
@@ -630,17 +641,37 @@ with middle_panel:
             format_func=lambda x: video_aspect_ratios[x][
                 0
             ],  # The label is displayed to the user
+            index=[m[1] for m in video_aspect_ratios].index(
+                config.ui.get("video_aspect", VideoAspect.portrait.value)
+            )
+            if config.ui.get("video_aspect", VideoAspect.portrait.value)
+            in [m[1] for m in video_aspect_ratios]
+            else 0,
         )
         params.video_aspect = VideoAspect(video_aspect_ratios[selected_index][1])
+        config.ui["video_aspect"] = params.video_aspect.value
 
+        clip_duration_options = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+        saved_clip_duration = int(config.ui.get("video_clip_duration", 3) or 3)
         params.video_clip_duration = st.selectbox(
-            tr("Clip Duration"), options=[2, 3, 4, 5, 6, 7, 8, 9, 10], index=1
+            tr("Clip Duration"),
+            options=clip_duration_options,
+            index=clip_duration_options.index(saved_clip_duration)
+            if saved_clip_duration in clip_duration_options
+            else 1,
         )
+        config.ui["video_clip_duration"] = params.video_clip_duration
+
+        video_count_options = [1, 2, 3, 4, 5]
+        saved_video_count = int(config.ui.get("video_count", 1) or 1)
         params.video_count = st.selectbox(
             tr("Number of Videos Generated Simultaneously"),
-            options=[1, 2, 3, 4, 5],
-            index=0,
+            options=video_count_options,
+            index=video_count_options.index(saved_video_count)
+            if saved_video_count in video_count_options
+            else 0,
         )
+        config.ui["video_count"] = params.video_count
     with st.container(border=True):
         st.write(tr("Audio Settings"))
 
@@ -650,6 +681,7 @@ with middle_panel:
             ("azure-tts-v2", "Azure TTS V2"),
             ("siliconflow", "SiliconFlow TTS"),
             ("gemini-tts", "Google Gemini TTS"),
+            ("openai-tts", "OpenAI TTS"),
         ]
 
         # 获取保存的TTS服务器，默认为v1
@@ -670,6 +702,11 @@ with middle_panel:
         selected_tts_server = tts_servers[selected_tts_server_index][0]
         config.ui["tts_server"] = selected_tts_server
 
+        if selected_tts_server == "openai-tts":
+            config.app["tts_provider"] = "openai"
+        else:
+            config.app["tts_provider"] = ""
+
         # 根据选择的TTS服务器获取声音列表
         filtered_voices = []
 
@@ -679,6 +716,19 @@ with middle_panel:
         elif selected_tts_server == "gemini-tts":
             # 获取Gemini TTS的声音列表
             filtered_voices = voice.get_gemini_voices()
+        elif selected_tts_server == "openai-tts":
+            saved_openai_voice = (config.app.get("openai_tts_voice", "") or "").strip()
+            openai_voices = [
+                "alloy",
+                "echo",
+                "fable",
+                "onyx",
+                "nova",
+                "shimmer",
+            ]
+            if saved_openai_voice and saved_openai_voice not in openai_voices:
+                openai_voices.insert(0, saved_openai_voice)
+            filtered_voices = [f"openai:{v}" for v in openai_voices]
         else:
             # 获取Azure的声音列表
             all_voices = voice.get_all_azure_voices(filter_locals=None)
@@ -776,6 +826,39 @@ with middle_panel:
                     if os.path.exists(audio_file):
                         os.remove(audio_file)
 
+        if selected_tts_server == "openai-tts":
+            saved_openai_tts_base_url = config.app.get("openai_tts_base_url", "")
+            saved_openai_tts_api_key = config.app.get("openai_tts_api_key", "")
+            saved_openai_tts_model_name = config.app.get("openai_tts_model_name", "")
+            saved_openai_tts_voice = config.app.get("openai_tts_voice", "")
+
+            openai_tts_base_url = st.text_input(
+                "OpenAI TTS Base Url",
+                value=saved_openai_tts_base_url,
+                key="openai_tts_base_url_input",
+            )
+            openai_tts_api_key = st.text_input(
+                "OpenAI TTS API Key",
+                value=saved_openai_tts_api_key,
+                type="password",
+                key="openai_tts_api_key_input",
+            )
+            openai_tts_model_name = st.text_input(
+                "OpenAI TTS Model Name",
+                value=saved_openai_tts_model_name,
+                key="openai_tts_model_name_input",
+            )
+            openai_tts_voice = st.text_input(
+                "OpenAI TTS Voice",
+                value=saved_openai_tts_voice,
+                key="openai_tts_voice_input",
+            )
+
+            config.app["openai_tts_base_url"] = openai_tts_base_url
+            config.app["openai_tts_api_key"] = openai_tts_api_key
+            config.app["openai_tts_model_name"] = openai_tts_model_name
+            config.app["openai_tts_voice"] = openai_tts_voice
+
         # 当选择V2版本或者声音是V2声音时，显示服务区域和API key输入框
         if selected_tts_server == "azure-tts-v2" or (
             voice_name and voice.is_azure_v2_voice(voice_name)
@@ -822,17 +905,27 @@ with middle_panel:
 
             config.siliconflow["api_key"] = siliconflow_api_key
 
+        voice_volume_options = [0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 5.0]
+        saved_voice_volume = float(config.ui.get("voice_volume", 1.0) or 1.0)
         params.voice_volume = st.selectbox(
             tr("Speech Volume"),
-            options=[0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 5.0],
-            index=2,
+            options=voice_volume_options,
+            index=voice_volume_options.index(saved_voice_volume)
+            if saved_voice_volume in voice_volume_options
+            else 2,
         )
+        config.ui["voice_volume"] = params.voice_volume
 
+        voice_rate_options = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0]
+        saved_voice_rate = float(config.ui.get("voice_rate", 1.0) or 1.0)
         params.voice_rate = st.selectbox(
             tr("Speech Rate"),
-            options=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0],
-            index=2,
+            options=voice_rate_options,
+            index=voice_rate_options.index(saved_voice_rate)
+            if saved_voice_rate in voice_rate_options
+            else 2,
         )
+        config.ui["voice_rate"] = params.voice_rate
 
         bgm_options = [
             (tr("No Background Music"), ""),
@@ -841,7 +934,11 @@ with middle_panel:
         ]
         selected_index = st.selectbox(
             tr("Background Music"),
-            index=1,
+            index=[m[1] for m in bgm_options].index(
+                config.ui.get("bgm_type", "random")
+            )
+            if config.ui.get("bgm_type", "random") in [m[1] for m in bgm_options]
+            else 1,
             options=range(
                 len(bgm_options)
             ),  # Use the index as the internal option value
@@ -851,25 +948,38 @@ with middle_panel:
         )
         # Get the selected background music type
         params.bgm_type = bgm_options[selected_index][1]
+        config.ui["bgm_type"] = params.bgm_type
 
         # Show or hide components based on the selection
         if params.bgm_type == "custom":
             custom_bgm_file = st.text_input(
-                tr("Custom Background Music File"), key="custom_bgm_file_input"
+                tr("Custom Background Music File"),
+                value=config.ui.get("bgm_file", ""),
+                key="custom_bgm_file_input",
             )
             if custom_bgm_file and os.path.exists(custom_bgm_file):
                 params.bgm_file = custom_bgm_file
+                config.ui["bgm_file"] = custom_bgm_file
                 # st.write(f":red[已选择自定义背景音乐]：**{custom_bgm_file}**")
         params.bgm_volume = st.selectbox(
             tr("Background Music Volume"),
             options=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-            index=2,
+            index=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0].index(
+                float(config.ui.get("bgm_volume", 0.2) or 0.2)
+            )
+            if float(config.ui.get("bgm_volume", 0.2) or 0.2)
+            in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            else 2,
         )
+        config.ui["bgm_volume"] = params.bgm_volume
 
 with right_panel:
     with st.container(border=True):
         st.write(tr("Subtitle Settings"))
-        params.subtitle_enabled = st.checkbox(tr("Enable Subtitles"), value=True)
+        params.subtitle_enabled = st.checkbox(
+            tr("Enable Subtitles"), value=bool(config.ui.get("subtitle_enabled", True))
+        )
+        config.ui["subtitle_enabled"] = params.subtitle_enabled
         font_names = get_all_fonts()
         saved_font_name = config.ui.get("font_name", "MicrosoftYaHeiBold.ttc")
         saved_font_name_index = 0
@@ -886,32 +996,39 @@ with right_panel:
             (tr("Bottom"), "bottom"),
             (tr("Custom"), "custom"),
         ]
+
+        saved_subtitle_position = config.ui.get("subtitle_position", "bottom")
         selected_index = st.selectbox(
             tr("Position"),
-            index=2,
+            index=[m[1] for m in subtitle_positions].index(saved_subtitle_position)
+            if saved_subtitle_position in [m[1] for m in subtitle_positions]
+            else 2,
             options=range(len(subtitle_positions)),
             format_func=lambda x: subtitle_positions[x][0],
         )
         params.subtitle_position = subtitle_positions[selected_index][1]
+        config.ui["subtitle_position"] = params.subtitle_position
 
         if params.subtitle_position == "custom":
             custom_position = st.text_input(
                 tr("Custom Position (% from top)"),
-                value="70.0",
+                value=str(config.ui.get("custom_position", "70.0")),
                 key="custom_position_input",
             )
             try:
                 params.custom_position = float(custom_position)
                 if params.custom_position < 0 or params.custom_position > 100:
                     st.error(tr("Please enter a value between 0 and 100"))
+                else:
+                    config.ui["custom_position"] = params.custom_position
             except ValueError:
                 st.error(tr("Please enter a valid number"))
 
         font_cols = st.columns([0.3, 0.7])
-        with font_cols[0]:
-            saved_text_fore_color = config.ui.get("text_fore_color", "#FFFFFF")
+        if params.subtitle_enabled:
+            saved_font_size = config.ui.get("font_size", 60)
             params.text_fore_color = st.color_picker(
-                tr("Font Color"), saved_text_fore_color
+                tr("Text Color"), config.ui.get("text_fore_color", "#FFFFFF")
             )
             config.ui["text_fore_color"] = params.text_fore_color
 
@@ -922,9 +1039,15 @@ with right_panel:
 
         stroke_cols = st.columns([0.3, 0.7])
         with stroke_cols[0]:
-            params.stroke_color = st.color_picker(tr("Stroke Color"), "#000000")
+            saved_stroke_color = config.ui.get("stroke_color", "#000000")
+            params.stroke_color = st.color_picker(tr("Stroke Color"), saved_stroke_color)
+            config.ui["stroke_color"] = params.stroke_color
         with stroke_cols[1]:
-            params.stroke_width = st.slider(tr("Stroke Width"), 0.0, 10.0, 1.5)
+            saved_stroke_width = float(config.ui.get("stroke_width", 1.5) or 0)
+            params.stroke_width = st.slider(
+                tr("Stroke Width"), 0.0, 10.0, saved_stroke_width
+            )
+            config.ui["stroke_width"] = params.stroke_width
     with st.expander(tr("Click to show API Key management"), expanded=False):
         st.subheader(tr("Manage Pexels and Pixabay API Keys"))
 

@@ -56,23 +56,6 @@ openai_base_url = ""
 # Check your available models at https://platform.openai.com/account/limits
 openai_model_name = "gpt-4o-mini"
 
-########## OpenAI-style TTS (POST /v1/audio/speech compatible)
-# Use this if your TTS provider exposes an OpenAI-compatible endpoint.
-# Set tts_provider to "openai" (or prefix voice_name with "openai:") to enable.
-#
-# Examples:
-#   tts_provider = "openai"
-#   openai_tts_base_url = "https://api.openai.com/v1"          # will call /v1/audio/speech
-#   openai_tts_base_url = "https://your-provider.example.com"  # will call /v1/audio/speech
-#   openai_tts_api_key = "..."
-#   openai_tts_model_name = "tts-1"
-#   openai_tts_voice = "alloy"
-tts_provider = ""
-openai_tts_base_url = ""
-openai_tts_api_key = ""
-openai_tts_model_name = "tts-1"
-openai_tts_voice = "alloy"
-
 ########## Moonshot API Key
 # Visit https://platform.moonshot.cn/console/api-keys to get your API key.
 moonshot_api_key = ""

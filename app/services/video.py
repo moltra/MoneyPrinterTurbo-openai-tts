@@ -29,6 +29,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services.utils import video_effects
+from app.config import config
 from app.utils import utils
 
 class SubClippedVideoClip:
@@ -50,6 +51,31 @@ class SubClippedVideoClip:
 audio_codec = "aac"
 video_codec = "libx264"
 fps = 30
+
+
+def _get_video_codec() -> str:
+    codec = (config.app.get("video_codec", "") or "").strip()
+    return codec or video_codec
+
+
+def _get_video_ffmpeg_params(codec: str) -> List[str]:
+    params = config.app.get("video_ffmpeg_params")
+    if isinstance(params, list):
+        return [str(x) for x in params if str(x).strip()]
+
+    if codec in {"h264_nvenc", "hevc_nvenc"}:
+        return [
+            "-preset",
+            "p4",
+            "-rc",
+            "vbr",
+            "-cq",
+            "19",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+
+    return []
 
 def close_clip(clip):
     if clip is None:
@@ -132,6 +158,9 @@ def combine_videos(
     req_dur = max_clip_duration
     logger.info(f"maximum clip duration: {req_dur} seconds")
     output_dir = os.path.dirname(combined_video_path)
+
+    selected_video_codec = _get_video_codec()
+    selected_ffmpeg_params = _get_video_ffmpeg_params(selected_video_codec)
 
     aspect = VideoAspect(video_aspect)
     video_width, video_height = aspect.to_resolution()
@@ -219,7 +248,13 @@ def combine_videos(
                 
             # wirte clip to temp file
             clip_file = f"{output_dir}/temp-clip-{i+1}.mp4"
-            clip.write_videofile(clip_file, logger=None, fps=fps, codec=video_codec)
+            clip.write_videofile(
+                clip_file,
+                logger=None,
+                fps=fps,
+                codec=selected_video_codec,
+                ffmpeg_params=selected_ffmpeg_params,
+            )
             
             close_clip(clip)
         
@@ -281,6 +316,8 @@ def combine_videos(
                 logger=None,
                 temp_audiofile_path=output_dir,
                 audio_codec=audio_codec,
+                codec=selected_video_codec,
+                ffmpeg_params=selected_ffmpeg_params,
                 fps=fps,
             )
             close_clip(base_clip)
@@ -381,6 +418,9 @@ def generate_video(
     # write into the same directory as the output file
     output_dir = os.path.dirname(output_file)
 
+    selected_video_codec = _get_video_codec()
+    selected_ffmpeg_params = _get_video_ffmpeg_params(selected_video_codec)
+
     font_path = ""
     if params.subtitle_enabled:
         if not params.font_name:
@@ -475,6 +515,8 @@ def generate_video(
     video_clip.write_videofile(
         output_file,
         audio_codec=audio_codec,
+        codec=selected_video_codec,
+        ffmpeg_params=selected_ffmpeg_params,
         temp_audiofile_path=output_dir,
         threads=params.n_threads or 2,
         logger=None,

@@ -14,6 +14,36 @@ from app.config import config
 _max_retries = 5
 
 
+def _ollama_api_generate_endpoint() -> str:
+    base_url = (config.app.get("ollama_base_url", "") or "").strip()
+    if not base_url:
+        base_url = "http://localhost:11434/v1"
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[: -len("/v1")]
+    return f"{base_url}/api/generate"
+
+
+def unload_ollama_model(model_name: str) -> None:
+    if not model_name:
+        return
+    try:
+        url = _ollama_api_generate_endpoint()
+        requests.post(
+            url,
+            json={
+                "model": model_name,
+                "prompt": "",
+                "keep_alive": 0,
+                "stream": False,
+            },
+            timeout=5,
+        )
+        logger.info(f"ollama model unload requested: {model_name}")
+    except Exception as e:
+        logger.warning(f"ollama model unload failed: {e}")
+
+
 def _generate_response(prompt: str) -> str:
     try:
         content = ""
@@ -376,25 +406,34 @@ Generate a script for a video, depending on the subject of the video.
         # Join the selected paragraphs into a single string
         return "\n\n".join(paragraphs)
 
-    for i in range(_max_retries):
-        try:
-            response = _generate_response(prompt=prompt)
-            if response:
-                final_script = format_response(response)
-            else:
-                logging.error("gpt returned an empty response")
+    try:
+        for i in range(_max_retries):
+            try:
+                response = _generate_response(prompt=prompt)
+                if response:
+                    final_script = format_response(response)
+                else:
+                    logging.error("gpt returned an empty response")
 
-            # g4f may return an error message
-            if final_script and "当日额度已消耗完" in final_script:
-                raise ValueError(final_script)
+                # g4f may return an error message
+                if final_script and "当日额度已消耗完" in final_script:
+                    raise ValueError(final_script)
 
-            if final_script:
-                break
-        except Exception as e:
-            logger.error(f"failed to generate script: {e}")
+                if final_script:
+                    break
+            except Exception as e:
+                logger.error(f"failed to generate script: {e}")
 
-        if i < _max_retries:
-            logger.warning(f"failed to generate video script, trying again... {i + 1}")
+            if i < _max_retries:
+                logger.warning(
+                    f"failed to generate video script, trying again... {i + 1}"
+                )
+    finally:
+        if (
+            config.app.get("llm_provider", "openai") == "ollama"
+            and config.app.get("ollama_unload_after_generate", False)
+        ):
+            unload_ollama_model(config.app.get("ollama_model_name"))
     if "Error: " in final_script:
         logger.error(f"failed to generate video script: {final_script}")
     else:
@@ -433,34 +472,43 @@ Please note that you must use English for generating video search terms; Chinese
 
     search_terms = []
     response = ""
-    for i in range(_max_retries):
-        try:
-            response = _generate_response(prompt)
-            if "Error: " in response:
-                logger.error(f"failed to generate video script: {response}")
-                return response
-            search_terms = json.loads(response)
-            if not isinstance(search_terms, list) or not all(
-                isinstance(term, str) for term in search_terms
-            ):
-                logger.error("response is not a list of strings.")
-                continue
+    try:
+        for i in range(_max_retries):
+            try:
+                response = _generate_response(prompt)
+                if "Error: " in response:
+                    logger.error(f"failed to generate video script: {response}")
+                    return response
+                search_terms = json.loads(response)
+                if not isinstance(search_terms, list) or not all(
+                    isinstance(term, str) for term in search_terms
+                ):
+                    logger.error("response is not a list of strings.")
+                    continue
 
-        except Exception as e:
-            logger.warning(f"failed to generate video terms: {str(e)}")
-            if response:
-                match = re.search(r"\[.*]", response)
-                if match:
-                    try:
-                        search_terms = json.loads(match.group())
-                    except Exception as e:
-                        logger.warning(f"failed to generate video terms: {str(e)}")
-                        pass
+            except Exception as e:
+                logger.warning(f"failed to generate video terms: {str(e)}")
+                if response:
+                    match = re.search(r"\[.*]", response)
+                    if match:
+                        try:
+                            search_terms = json.loads(match.group())
+                        except Exception as e:
+                            logger.warning(f"failed to generate video terms: {str(e)}")
+                            pass
 
-        if search_terms and len(search_terms) > 0:
-            break
-        if i < _max_retries:
-            logger.warning(f"failed to generate video terms, trying again... {i + 1}")
+            if search_terms and len(search_terms) > 0:
+                break
+            if i < _max_retries:
+                logger.warning(
+                    f"failed to generate video terms, trying again... {i + 1}"
+                )
+    finally:
+        if (
+            config.app.get("llm_provider", "openai") == "ollama"
+            and config.app.get("ollama_unload_after_generate", False)
+        ):
+            unload_ollama_model(config.app.get("ollama_model_name"))
 
     logger.success(f"completed: \n{search_terms}")
     return search_terms

@@ -33,4 +33,3 @@ debug/
 debug_*.py
 test_*.py
 streamlit.log
-MoneyPrinterTurbo-openai-tts.code-workspace

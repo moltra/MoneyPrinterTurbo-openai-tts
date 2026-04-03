@@ -1195,15 +1195,15 @@ def openai_style_tts(
 
     model = config.app.get("openai_tts_model_name", "").strip() or "tts-1"
 
-    voice_value = voice_name
-    if is_openai_style_tts_voice(voice_value):
-        voice_value = voice_value[len("openai:") :].strip()
-    voice_value = voice_value.strip()
-    if ":" in voice_value:
-        possible_model, possible_voice = voice_value.split(":", 1)
-        if possible_model and possible_voice:
-            model = possible_model.strip()
-            voice_value = possible_voice.strip()
+    voice_value = ""
+    voice_name = (voice_name or "").strip()
+    if is_openai_style_tts_voice(voice_name):
+        voice_value = voice_name[len("openai:") :].strip()
+        if ":" in voice_value:
+            possible_model, possible_voice = voice_value.split(":", 1)
+            if possible_model and possible_voice:
+                model = possible_model.strip()
+                voice_value = possible_voice.strip()
 
     if not voice_value:
         voice_value = config.app.get("openai_tts_voice", "").strip() or "alloy"
