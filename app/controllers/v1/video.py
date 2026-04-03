@@ -33,8 +33,7 @@ from app.services import task as tm
 from app.utils import utils
 
 # 认证依赖项
-# router = new_router(dependencies=[Depends(base.verify_token)])
-router = new_router()
+router = new_router(dependencies=[Depends(base.verify_token)])
 
 _enable_redis = config.app.get("enable_redis", False)
 _redis_host = config.app.get("redis_host", "localhost")
@@ -51,6 +50,16 @@ if _enable_redis:
     )
 else:
     task_manager = InMemoryTaskManager(max_concurrent_tasks=_max_concurrent_tasks)
+
+
+def _safe_task_path(tasks_dir: str, unsafe_path: str) -> pathlib.Path:
+    base_dir = pathlib.Path(tasks_dir).resolve()
+    candidate = (base_dir / unsafe_path).resolve()
+    try:
+        candidate.relative_to(base_dir)
+    except ValueError as e:
+        raise HttpException("", status_code=400, message="invalid file path") from e
+    return candidate
 
 
 @router.post("/videos", response_model=TaskResponse, summary="Generate a short video")
@@ -209,9 +218,12 @@ def get_bgm_list(request: Request):
 def upload_bgm_file(request: Request, file: UploadFile = File(...)):
     request_id = base.get_task_id(request)
     # check file ext
-    if file.filename.endswith("mp3"):
+    filename = os.path.basename(file.filename or "")
+    if not filename:
+        raise HttpException("", status_code=400, message=f"{request_id}: invalid filename")
+    if filename.lower().endswith(".mp3"):
         song_dir = utils.song_dir()
-        save_path = os.path.join(song_dir, file.filename)
+        save_path = os.path.join(song_dir, filename)
         # save file
         with open(save_path, "wb+") as buffer:
             # If the file already exists, it will be overwritten
@@ -223,6 +235,7 @@ def upload_bgm_file(request: Request, file: UploadFile = File(...)):
     raise HttpException(
         "", status_code=400, message=f"{request_id}: Only *.mp3 files can be uploaded"
     )
+
 
 @router.get(
     "/video_materials", response_model=VideoMaterialRetrieveResponse, summary="Retrieve local video materials"
@@ -255,9 +268,12 @@ def upload_video_material_file(request: Request, file: UploadFile = File(...)):
     request_id = base.get_task_id(request)
     # check file ext
     allowed_suffixes = ("mp4", "mov", "avi", "flv", "mkv", "jpg", "jpeg", "png")
-    if file.filename.endswith(allowed_suffixes):
+    filename = os.path.basename(file.filename or "")
+    if not filename:
+        raise HttpException("", status_code=400, message=f"{request_id}: invalid filename")
+    if filename.lower().endswith(allowed_suffixes):
         local_videos_dir = utils.storage_dir("local_videos", create=True)
-        save_path = os.path.join(local_videos_dir, file.filename)
+        save_path = os.path.join(local_videos_dir, filename)
         # save file
         with open(save_path, "wb+") as buffer:
             # If the file already exists, it will be overwritten
@@ -270,10 +286,11 @@ def upload_video_material_file(request: Request, file: UploadFile = File(...)):
         "", status_code=400, message=f"{request_id}: Only files with extensions {', '.join(allowed_suffixes)} can be uploaded"
     )
 
+
 @router.get("/stream/{file_path:path}")
 async def stream_video(request: Request, file_path: str):
     tasks_dir = utils.task_dir()
-    video_path = os.path.join(tasks_dir, file_path)
+    video_path = str(_safe_task_path(tasks_dir, file_path))
     range_header = request.headers.get("Range")
     video_size = os.path.getsize(video_path)
     start, end = 0, video_size - 1
@@ -321,7 +338,7 @@ async def download_video(_: Request, file_path: str):
     :return: video file
     """
     tasks_dir = utils.task_dir()
-    video_path = os.path.join(tasks_dir, file_path)
+    video_path = str(_safe_task_path(tasks_dir, file_path))
     file_path = pathlib.Path(video_path)
     filename = file_path.stem
     extension = file_path.suffix
