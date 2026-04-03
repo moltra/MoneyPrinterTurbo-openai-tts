@@ -1,0 +1,94 @@
+########################### NETWORKS
+# You may customize the network subnets (192.168.x.0/24) below as you please.
+networks:
+  default:
+    driver: bridge
+  socket_proxy:
+    name: socket_proxy
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.91.0/24
+  traefik_proxy:
+    name: traefik_proxy
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.90.0/24
+  # NETWORKS-PLACEHOLDER-DO-NOT-DELETE
+  
+########################### SECRETS
+secrets:
+  basic_auth_credentials:
+    file: $DOCKERDIR/secrets/basic_auth_credentials
+  cf_dns_api_token:
+    file: $DOCKERDIR/secrets/cf_dns_api_token
+  postgres_default_password:
+    file: $DOCKERDIR/secrets/postgres_default_password
+  sshwifty_password:
+    file: $DOCKERDIR/secrets/sshwifty_password
+  tinyauth_secret:
+    file: $DOCKERDIR/secrets/tinyauth_secret
+  authentik_postgresql_user:
+    file: $DOCKERDIR/secrets/authentik_postgresql_user
+  authentik_postgresql_password:
+    file: $DOCKERDIR/secrets/authentik_postgresql_password
+  authentik_secret_key:
+    file: $DOCKERDIR/secrets/authentik_secret_key
+  OPENWEBUI_SECRET_KEY:
+    file: $DOCKERDIR/secrets/OPENWEBUI_SECRET_KEY
+  # SECRETS-PLACEHOLDER-DO-NOT-DELETE
+                                        
+include:
+  ########################### SERVICES
+  # HOSTNAME defined in .env file
+
+  # - compose/$HOSTNAME/custom.yml
+  - compose/$HOSTNAME/traefik.yml
+  - compose/$HOSTNAME/socket-proxy.yml
+  - compose/$HOSTNAME/deployrr-dashboard.yml
+  - compose/$HOSTNAME/deunhealth.yml
+  - compose/$HOSTNAME/change-detection.yml
+  - compose/$HOSTNAME/dockwatch.yml
+  - compose/$HOSTNAME/dockpeek.yml
+  - compose/$HOSTNAME/dozzle.yml
+  - compose/$HOSTNAME/it-tools.yml
+  - compose/$HOSTNAME/jellyfin.yml
+  - compose/$HOSTNAME/postgresql.yml
+  - compose/$HOSTNAME/qbittorrent.yml
+  - compose/$HOSTNAME/sshwifty.yml
+  - compose/$HOSTNAME/traefik-access-log.yml
+  - compose/$HOSTNAME/stirling-pdf.yml
+  - compose/$HOSTNAME/redis.yml
+  - compose/$HOSTNAME/redis-commander.yml
+  - compose/$HOSTNAME/pdfding.yml
+  - compose/$HOSTNAME/pdfding-postgresql.yml
+  - compose/$HOSTNAME/sonarr.yml
+  - compose/$HOSTNAME/radarr.yml
+  - compose/$HOSTNAME/mylar3.yml
+  - compose/$HOSTNAME/prowlarr.yml
+  - compose/$HOSTNAME/jellyseerr.yml
+  - compose/$HOSTNAME/authentik-postgresql.yml
+  - compose/$HOSTNAME/authentik.yml
+  - compose/$HOSTNAME/authentik-worker.yml
+  - compose/$HOSTNAME/boxarr.yml
+  - compose/$HOSTNAME/audiobookshelf.yml
+  - compose/$HOSTNAME/glances.yml
+  - compose/$HOSTNAME/docker-gc.yml
+  - compose/$HOSTNAME/trailarr.yml
+  - compose/$HOSTNAME/ollama.yml
+  - compose/$HOSTNAME/open-webui.yml
+  - compose/$HOSTNAME/komga.yml
+  - compose/$HOSTNAME/couchdb-livesync.yml
+  - compose/$HOSTNAME/traefik-error-log.yml
+  - compose/$HOSTNAME/node-red.yml
+  - compose/$HOSTNAME/n8n.yml
+  - compose/$HOSTNAME/n8n-postgresql.yml
+  - compose/$HOSTNAME/moneyprinterturbo.yml
+  - compose/$HOSTNAME/alltalk.yml
+  - compose/$HOSTNAME/cloud-commander.yml
+  - compose/$HOSTNAME/double-commander.yml
+  - compose/$HOSTNAME/nextcloud.yml
+  - compose/$HOSTNAME/nextcloud-mariadb.yml
+  - compose/$HOSTNAME/nextcloud-redis.yml
+  # SERVICE-PLACEHOLDER-DO-NOT-DELETE

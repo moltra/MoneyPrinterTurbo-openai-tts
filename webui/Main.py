@@ -1,8 +1,13 @@
 import os
 import platform
+import re
+import shutil
+import signal
 import sys
+import time
 from uuid import uuid4
 
+import requests
 import streamlit as st
 from loguru import logger
 
@@ -16,14 +21,12 @@ if root_dir not in sys.path:
 
 from app.config import config
 from app.models.schema import (
-    MaterialInfo,
     VideoAspect,
     VideoConcatMode,
     VideoParams,
     VideoTransitionMode,
 )
 from app.services import llm, voice
-from app.services import task as tm
 from app.utils import utils
 
 st.set_page_config(
@@ -41,6 +44,9 @@ st.set_page_config(
 )
 
 
+is_dev_mode = (os.environ.get("MPT_MODE", "") or "").strip().lower() == "dev"
+
+
 streamlit_style = """
 <style>
 h1 {
@@ -49,6 +55,41 @@ h1 {
 </style>
 """
 st.markdown(streamlit_style, unsafe_allow_html=True)
+
+if is_dev_mode:
+    st.markdown(
+        """
+<style>
+  /* DEV mode tint */
+  [data-testid="stAppViewContainer"] {
+    background: linear-gradient(180deg, rgba(255, 239, 213, 0.35) 0%, rgba(255, 239, 213, 0.0) 40%);
+  }
+  [data-testid="stHeader"] {
+    background: rgba(255, 239, 213, 0.65);
+  }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _api_base_url() -> str:
+    base_url = (os.environ.get("MPT_API_BASE_URL", "") or "").strip()
+    if base_url:
+        return base_url.rstrip("/")
+    return "http://127.0.0.1:8080"
+
+
+def _api_key() -> str:
+    return (os.environ.get("MPT_API_KEY", "") or config.app.get("api_key", "") or "").strip()
+
+
+def _api_headers() -> dict:
+    api_key = _api_key()
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+    return headers
 
 # 定义资源目录
 font_dir = os.path.join(root_dir, "resource", "fonts")
@@ -74,7 +115,10 @@ locales = utils.load_locales(i18n_dir)
 title_col, lang_col = st.columns([3, 1])
 
 with title_col:
-    st.title(f"MoneyPrinterTurbo v{config.project_version}")
+    if is_dev_mode:
+        st.title(f"MoneyPrinterTurbo DEV v{config.project_version}")
+    else:
+        st.title(f"MoneyPrinterTurbo v{config.project_version}")
 
 with lang_col:
     display_languages = []
@@ -1115,7 +1159,6 @@ with right_panel:
 start_button = st.button(tr("Generate Video"), use_container_width=True, type="primary")
 if start_button:
     config.save_config()
-    task_id = str(uuid4())
     if not params.video_subject and not params.video_script:
         st.error(tr("Video Script and Subject Cannot Both Be Empty"))
         scroll_to_bottom()
@@ -1166,14 +1209,64 @@ if start_button:
     logger.info(utils.to_json(params))
     scroll_to_bottom()
 
-    result = tm.start(task_id=task_id, params=params)
-    if not result or "videos" not in result:
+    api_base_url = _api_base_url()
+    try:
+        create_resp = requests.post(
+            f"{api_base_url}/api/v1/videos",
+            headers=_api_headers(),
+            json=params.model_dump(mode="json"),
+            timeout=30,
+        )
+        create_resp.raise_for_status()
+        create_body = create_resp.json() if create_resp.content else {}
+        task_id = (create_body.get("data") or {}).get("task_id")
+        if not task_id:
+            st.error(tr("Video Generation Failed"))
+            logger.error(f"task creation failed: {create_body}")
+            scroll_to_bottom()
+            st.stop()
+    except Exception as e:
         st.error(tr("Video Generation Failed"))
-        logger.error(tr("Video Generation Failed"))
+        logger.exception(e)
         scroll_to_bottom()
         st.stop()
 
-    video_files = result.get("videos", [])
+    progress_bar = st.progress(0)
+    status_placeholder = st.empty()
+    video_files = []
+
+    while True:
+        try:
+            task_resp = requests.get(
+                f"{api_base_url}/api/v1/tasks/{task_id}",
+                headers=_api_headers(),
+                timeout=30,
+            )
+            task_resp.raise_for_status()
+            task_body = task_resp.json() if task_resp.content else {}
+            task = task_body.get("data") or {}
+        except Exception as e:
+            status_placeholder.error(tr("Video Generation Failed"))
+            logger.exception(e)
+            scroll_to_bottom()
+            st.stop()
+
+        state = int(task.get("state") or 0)
+        progress = int(task.get("progress") or 0)
+        progress_bar.progress(max(0, min(progress, 100)))
+
+        if state == -1:
+            status_placeholder.error(tr("Video Generation Failed"))
+            scroll_to_bottom()
+            st.stop()
+
+        if state == 1:
+            video_files = task.get("videos") or []
+            break
+
+        status_placeholder.info(f"{tr('Generating Video')} ({progress}%)")
+        time.sleep(2)
+
     st.success(tr("Video Generation Completed"))
     try:
         if video_files:

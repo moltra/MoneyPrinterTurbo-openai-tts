@@ -1,3 +1,6 @@
+project_name = "MoneyPrinterTurbo (Self-Hosted)"
+project_version = "1.2.7-selfhosted.1"
+
 [app]
 video_source = "pexels" # "pexels" or "pixabay"
 

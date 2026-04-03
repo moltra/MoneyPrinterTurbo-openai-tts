@@ -4,6 +4,7 @@ import os
 import random
 import gc
 import shutil
+import subprocess
 from typing import List
 from loguru import logger
 from moviepy import (
@@ -279,66 +280,55 @@ def combine_videos(
     logger.info("starting clip merging process")
     if not processed_clips:
         logger.warning("no clips available for merging")
+        close_clip(audio_clip)
         return combined_video_path
     
     # if there is only one clip, use it directly
     if len(processed_clips) == 1:
         logger.info("using single clip directly")
         shutil.copy(processed_clips[0].file_path, combined_video_path)
-        delete_files(processed_clips)
+        delete_files([processed_clips[0].file_path])
         logger.info("video combining completed")
+        close_clip(audio_clip)
         return combined_video_path
-    
-    # create initial video file as base
-    base_clip_path = processed_clips[0].file_path
-    temp_merged_video = f"{output_dir}/temp-merged-video.mp4"
-    temp_merged_next = f"{output_dir}/temp-merged-next.mp4"
-    
-    # copy first clip as initial merged video
-    shutil.copy(base_clip_path, temp_merged_video)
-    
-    # merge remaining video clips one by one
-    for i, clip in enumerate(processed_clips[1:], 1):
-        logger.info(f"merging clip {i}/{len(processed_clips)-1}, duration: {clip.duration:.2f}s")
-        
-        try:
-            # load current base video and next clip to merge
-            base_clip = VideoFileClip(temp_merged_video)
-            next_clip = VideoFileClip(clip.file_path)
-            
-            # merge these two clips
-            merged_clip = concatenate_videoclips([base_clip, next_clip])
 
-            # save merged result to temp file
-            merged_clip.write_videofile(
-                filename=temp_merged_next,
-                threads=threads,
-                logger=None,
-                temp_audiofile_path=output_dir,
-                audio_codec=audio_codec,
-                codec=selected_video_codec,
-                ffmpeg_params=selected_ffmpeg_params,
-                fps=fps,
-            )
-            close_clip(base_clip)
-            close_clip(next_clip)
-            close_clip(merged_clip)
-            
-            # replace base file with new merged file
-            delete_files(temp_merged_video)
-            os.rename(temp_merged_next, temp_merged_video)
-            
-        except Exception as e:
-            logger.error(f"failed to merge clip: {str(e)}")
-            continue
-    
-    # after merging, rename final result to target file name
-    os.rename(temp_merged_video, combined_video_path)
-    
-    # clean temp files
-    clip_files = [clip.file_path for clip in processed_clips]
-    delete_files(clip_files)
-            
+    concat_list_path = os.path.join(output_dir, "temp-concat-list.txt")
+    try:
+        with open(concat_list_path, "w", encoding="utf-8") as f:
+            for clip in processed_clips:
+                clip_path = os.path.abspath(clip.file_path)
+                # ffmpeg concat demuxer expects: file '...'
+                # If the path contains single quotes, they must be escaped as: '\''
+                escaped_clip_path = clip_path.replace("'", "'\\\\''")
+                f.write(f"file '{escaped_clip_path}'\n")
+
+        ffmpeg_bin = (config.app.get("ffmpeg_path", "") or "").strip() or "ffmpeg"
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concat_list_path,
+            "-r",
+            str(fps),
+            "-an",
+            "-c:v",
+            selected_video_codec,
+        ]
+        cmd.extend(selected_ffmpeg_params)
+        cmd.append(combined_video_path)
+
+        logger.info("merging clips using ffmpeg")
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    finally:
+        clip_files = [clip.file_path for clip in processed_clips]
+        delete_files(clip_files)
+        delete_files(concat_list_path)
+        close_clip(audio_clip)
+
     logger.info("video combining completed")
     return combined_video_path
 

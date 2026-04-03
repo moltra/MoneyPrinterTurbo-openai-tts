@@ -12,6 +12,8 @@
 /**/.streamlit
 __pycache__
 logs/
+/org_repo/.git
+
 
 node_modules
 # VuePress 默认临时文件目录
