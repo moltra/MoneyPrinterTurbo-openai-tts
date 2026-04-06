@@ -1,5 +1,6 @@
 import os
 import platform
+import pathlib
 import re
 import shutil
 import signal
@@ -78,6 +79,42 @@ def _api_base_url() -> str:
     if base_url:
         return base_url.rstrip("/")
     return "http://127.0.0.1:8080"
+
+
+def _public_api_base_url() -> str:
+    base_url = (os.environ.get("MPT_PUBLIC_API_BASE_URL", "") or "").strip()
+    if base_url:
+        return base_url.rstrip("/")
+    return _api_base_url()
+
+
+def _safe_task_dir(task_id: str) -> pathlib.Path:
+    base_dir = pathlib.Path(utils.task_dir()).resolve()
+    candidate = (base_dir / (task_id or "")).resolve()
+    candidate.relative_to(base_dir)
+    return candidate
+
+
+def _list_task_ids(limit: int = 50) -> list[str]:
+    tasks_dir = pathlib.Path(utils.task_dir()).resolve()
+    if not tasks_dir.exists():
+        return []
+    items = []
+    for p in tasks_dir.iterdir():
+        if not p.is_dir():
+            continue
+        try:
+            mtime = p.stat().st_mtime
+        except Exception:
+            mtime = 0
+        items.append((mtime, p.name))
+    items.sort(reverse=True)
+    return [name for _, name in items[: max(0, int(limit or 0))]]
+
+
+def _task_file_url(public_api_base_url: str, task_id: str, filename: str) -> str:
+    base = (public_api_base_url or "").rstrip("/")
+    return f"{base}/tasks/{task_id}/{filename}"
 
 
 def _api_key() -> str:
@@ -1119,7 +1156,9 @@ with right_panel:
 
             if config.app["pexels_api_keys"]:
                 delete_key = st.selectbox(
-                    tr("Select Pexels API Key to delete"), config.app["pexels_api_keys"], key="pexels_delete_key"
+                    tr("Select Pexels API Key to delete"),
+                    config.app["pexels_api_keys"],
+                    key="pexels_delete_key",
                 )
                 if st.button(tr("Delete Selected Pexels API Key")):
                     config.app["pexels_api_keys"].remove(delete_key)
@@ -1235,6 +1274,8 @@ if start_button:
     status_placeholder = st.empty()
     video_files = []
 
+    public_api_base_url = _public_api_base_url()
+
     while True:
         try:
             task_resp = requests.get(
@@ -1262,6 +1303,14 @@ if start_button:
 
         if state == 1:
             video_files = task.get("videos") or []
+            if public_api_base_url and api_base_url and public_api_base_url != api_base_url:
+                rewritten = []
+                for u in video_files:
+                    if isinstance(u, str) and u.startswith(api_base_url):
+                        rewritten.append(public_api_base_url + u[len(api_base_url) :])
+                    else:
+                        rewritten.append(u)
+                video_files = rewritten
             break
 
         status_placeholder.info(f"{tr('Generating Video')} ({progress}%)")
@@ -1281,3 +1330,31 @@ if start_button:
     scroll_to_bottom()
 
 config.save_config()
+
+with st.expander(tr("Task Browser"), expanded=False):
+    task_ids = _list_task_ids(limit=100)
+    if not task_ids:
+        st.info(tr("No tasks found"))
+    else:
+        selected_task_id = st.selectbox(tr("Task ID"), options=task_ids)
+        try:
+            task_path = _safe_task_dir(selected_task_id)
+            files = [p for p in task_path.iterdir() if p.is_file()]
+            files.sort(key=lambda p: p.name)
+            if not files:
+                st.info(tr("No files found in task"))
+            else:
+                public_api_base_url = _public_api_base_url()
+                for p in files:
+                    filename = p.name
+                    url = _task_file_url(public_api_base_url, selected_task_id, filename)
+                    st.write(f"{filename}  ")
+                    st.link_button(tr("Open"), url)
+                    lower = filename.lower()
+                    if lower.endswith((".mp4", ".mov", ".mkv", ".webm")):
+                        st.video(url)
+                    elif lower.endswith((".mp3", ".wav", ".m4a", ".aac", ".flac")):
+                        st.audio(url)
+        except Exception as e:
+            st.error(tr("Failed to load task files"))
+            logger.exception(e)
