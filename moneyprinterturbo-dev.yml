@@ -39,6 +39,7 @@ services:
       - PGID=$PGID
       - MPT_MODE=dev
       - MPT_API_BASE_URL=http://moneyprinterturbo-dev-api:8080
+      - MPT_PUBLIC_API_BASE_URL=http://localhost:8089
     volumes:
       - ${MPT_REPO_DIR:-/mnt/data/repos/MoneyPrinterTurbo-openai-tts}:/MoneyPrinterTurbo
       - $DOCKERDIR/appdata/moneyprinterturbo-dev/config/config.toml:/MoneyPrinterTurbo/config.toml
