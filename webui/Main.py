@@ -1,6 +1,7 @@
 import os
 import platform
 import pathlib
+import json
 import re
 import shutil
 import signal
@@ -77,7 +78,13 @@ if is_dev_mode:
 def _api_base_url() -> str:
     base_url = (os.environ.get("MPT_API_BASE_URL", "") or "").strip()
     if base_url:
-        return base_url.rstrip("/")
+        base_url = base_url.rstrip("/")
+        try:
+            if os.path.exists("/.dockerenv") and base_url.endswith(":8089"):
+                return "http://moneyprinterturbo-dev-api:8080"
+        except Exception:
+            pass
+        return base_url
     return "http://127.0.0.1:8080"
 
 
@@ -115,6 +122,63 @@ def _list_task_ids(limit: int = 50) -> list[str]:
 def _task_file_url(public_api_base_url: str, task_id: str, filename: str) -> str:
     base = (public_api_base_url or "").rstrip("/")
     return f"{base}/tasks/{task_id}/{filename}"
+
+
+def _split_sentences(text: str) -> list[str]:
+    if not text:
+        return []
+    parts = re.split(r"(?<=[\.!?。！？])\s+|\n+", (text or "").strip())
+    out = []
+    for p in parts:
+        p = (p or "").strip()
+        if not p:
+            continue
+        out.append(p)
+    return out
+
+
+def _search_stock_videos(
+    api_base_url: str,
+    provider: str,
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: str,
+    limit: int,
+) -> list[dict]:
+    logger.info(
+        utils.to_json(
+            {
+                "event": "stock_video_search",
+                "provider": provider,
+                "search_term": search_term,
+                "minimum_duration": int(minimum_duration or 0),
+                "video_aspect": video_aspect,
+                "limit": int(limit or 20),
+            }
+        )
+    )
+    resp = requests.post(
+        f"{api_base_url}/api/v1/stock_videos/search",
+        headers=_api_headers(),
+        json={
+            "provider": provider,
+            "search_term": search_term,
+            "minimum_duration": int(minimum_duration or 0),
+            "video_aspect": video_aspect,
+            "limit": int(limit or 20),
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json() if resp.content else {}
+    items = (body.get("data") or {}).get("items") or []
+    if not isinstance(items, list):
+        return []
+    out = []
+    for it in items:
+        if isinstance(it, dict) and it.get("url"):
+            out.append(it)
+    return out
 
 
 def _api_key() -> str:
@@ -583,9 +647,18 @@ with left_panel:
         for code in support_locales:
             video_languages.append((code, code))
 
+        saved_video_language = config.ui.get("video_language", "")
+        saved_video_language_index = 0
+        try:
+            saved_video_language_index = [v[1] for v in video_languages].index(
+                saved_video_language
+            )
+        except Exception:
+            saved_video_language_index = 0
+
         selected_index = st.selectbox(
             tr("Script Language"),
-            index=0,
+            index=saved_video_language_index,
             options=range(
                 len(video_languages)
             ),  # Use the index as the internal option value
@@ -594,6 +667,7 @@ with left_panel:
             ],  # The label is displayed to the user
         )
         params.video_language = video_languages[selected_index][1]
+        config.ui["video_language"] = params.video_language
 
         if st.button(
             tr("Generate Video Script and Keywords"), key="auto_generate_script"
@@ -628,6 +702,80 @@ with left_panel:
         params.video_terms = st.text_area(
             tr("Video Keywords"), value=st.session_state["video_terms"]
         )
+
+        force_regen_terms = st.checkbox(
+            tr("Force regenerate keywords when generating"),
+            value=bool(st.session_state.get("force_regen_terms", False)),
+            key="force_regen_terms",
+        )
+
+        _terms_preview = []
+        if isinstance(params.video_terms, str) and params.video_terms.strip():
+            _terms_preview = [t.strip() for t in re.split(r"[,，]", params.video_terms) if t.strip()]
+        st.caption(f"{tr('Keyword count')}: {len(_terms_preview)}")
+
+        with st.expander(tr("Preview clips (pick your own)"), expanded=False):
+            if "selected_clip_urls" not in st.session_state:
+                st.session_state["selected_clip_urls"] = []
+            if "preview_items" not in st.session_state:
+                st.session_state["preview_items"] = []
+
+            preview_term = st.selectbox(
+                tr("Keyword to preview"),
+                options=_terms_preview,
+                index=0,
+                disabled=not bool(_terms_preview),
+                key="preview_term_select",
+            )
+            preview_limit = st.slider(tr("Preview results"), 5, 30, 10, 1)
+
+            cols = st.columns(2)
+            with cols[0]:
+                do_preview = st.button(tr("Search clips"), disabled=not bool(preview_term))
+            with cols[1]:
+                if st.button(tr("Clear selected clips")):
+                    st.session_state["selected_clip_urls"] = []
+
+            if do_preview:
+                api_base_url = _api_base_url()
+                try:
+                    resp = requests.post(
+                        f"{api_base_url}/api/v1/stock_videos/search",
+                        headers=_api_headers(),
+                        json={
+                            "provider": params.video_source,
+                            "search_term": preview_term,
+                            "minimum_duration": int(config.ui.get("video_clip_duration", 4) or 4),
+                            "video_aspect": params.video_aspect.value if hasattr(params.video_aspect, "value") else params.video_aspect,
+                            "limit": int(preview_limit),
+                        },
+                        timeout=60,
+                    )
+                    resp.raise_for_status()
+                    body = resp.json() if resp.content else {}
+                    items = (body.get("data") or {}).get("items") or []
+                    st.session_state["preview_items"] = items
+                except Exception as e:
+                    st.error(tr("Failed to search clips"))
+                    logger.exception(e)
+
+            items = st.session_state.get("preview_items") or []
+            if items:
+                urls = [i.get("url") for i in items if isinstance(i, dict) and i.get("url")]
+                selected = st.multiselect(
+                    tr("Select clips to use"),
+                    options=urls,
+                    default=st.session_state.get("selected_clip_urls") or [],
+                    key="selected_clip_urls_multiselect",
+                )
+                st.session_state["selected_clip_urls"] = selected
+                st.caption(f"{tr('Selected clips')}: {len(selected)}")
+
+                public_api_base_url = _public_api_base_url()
+                for u in urls[: int(preview_limit)]:
+                    if isinstance(u, str) and u.startswith(_api_base_url()):
+                        u = public_api_base_url + u[len(_api_base_url()) :]
+                    st.video(u)
 
 with middle_panel:
     with st.container(border=True):
@@ -684,6 +832,58 @@ with middle_panel:
             video_concat_modes[selected_index][1]
         )
         config.ui["video_concat_mode"] = params.video_concat_mode.value
+
+        pacing_presets = [
+            (tr("Custom"), "custom"),
+            (tr("Fast"), "fast"),
+            (tr("Normal"), "normal"),
+            (tr("Slow"), "slow"),
+        ]
+        saved_pacing = config.ui.get("pacing_preset", "custom")
+        if saved_pacing not in [p[1] for p in pacing_presets]:
+            saved_pacing = "custom"
+        pacing_index = [p[1] for p in pacing_presets].index(saved_pacing)
+        pacing_selected_index = st.selectbox(
+            tr("Pacing"),
+            options=range(len(pacing_presets)),
+            format_func=lambda x: pacing_presets[x][0],
+            index=pacing_index,
+        )
+        pacing_preset = pacing_presets[pacing_selected_index][1]
+        config.ui["pacing_preset"] = pacing_preset
+
+        auto_clip_duration = st.checkbox(
+            tr("Auto clip duration"),
+            value=bool(config.ui.get("auto_clip_duration", False)),
+            key="auto_clip_duration",
+        )
+        config.ui["auto_clip_duration"] = auto_clip_duration
+
+        if pacing_preset != "custom":
+            if pacing_preset == "fast":
+                config.ui["video_transition_mode"] = VideoTransitionMode.none.value
+                config.ui["video_clip_duration"] = 2
+                config.ui["video_concat_mode"] = VideoConcatMode.random.value
+            elif pacing_preset == "normal":
+                config.ui["video_transition_mode"] = VideoTransitionMode.fade_in.value
+                config.ui["video_clip_duration"] = 4
+                config.ui["video_concat_mode"] = VideoConcatMode.random.value
+            elif pacing_preset == "slow":
+                config.ui["video_transition_mode"] = VideoTransitionMode.fade_in.value
+                config.ui["video_clip_duration"] = 6
+                config.ui["video_concat_mode"] = VideoConcatMode.sequential.value
+
+        if auto_clip_duration and isinstance(params.video_script, str) and params.video_script.strip():
+            word_count = len(re.findall(r"\w+", params.video_script))
+            if word_count > 0:
+                if word_count < 60:
+                    config.ui["video_clip_duration"] = 3
+                elif word_count < 140:
+                    config.ui["video_clip_duration"] = 4
+                elif word_count < 220:
+                    config.ui["video_clip_duration"] = 5
+                else:
+                    config.ui["video_clip_duration"] = 6
 
         # 视频转场模式
         video_transition_modes = [
@@ -742,6 +942,14 @@ with middle_panel:
             else 1,
         )
         config.ui["video_clip_duration"] = params.video_clip_duration
+
+        params.sentence_level_clips = st.checkbox(
+            tr("Sentence-level clips"),
+            value=bool(config.ui.get("sentence_level_clips", False)),
+            key="sentence_level_clips",
+        )
+        config.ui["sentence_level_clips"] = bool(params.sentence_level_clips)
+        logger.debug(f"[CHECKBOX DEBUG] sentence_level_clips checkbox value: {params.sentence_level_clips}")
 
         video_count_options = [1, 2, 3, 4, 5]
         saved_video_count = int(config.ui.get("video_count", 1) or 1)
@@ -1195,9 +1403,371 @@ with right_panel:
                     config.save_config()
                     st.success(tr("Pixabay API Key deleted successfully"))
 
+with st.expander(tr("Bulk Run (Topics)"), expanded=False):
+    bulk_topics = st.text_area(
+        tr("Topics (one per line)"),
+        value=str(config.ui.get("bulk_topics", "")),
+        height=160,
+        key="bulk_topics_input",
+    )
+    config.ui["bulk_topics"] = bulk_topics
+
+    bulk_wait = st.checkbox(
+        tr("Wait for completion (slow)"),
+        value=bool(config.ui.get("bulk_wait", False)),
+        key="bulk_wait",
+    )
+    config.ui["bulk_wait"] = bool(bulk_wait)
+
+    bulk_created = []
+    bulk_failed = []
+
+    if st.button(tr("Create Bulk Tasks"), use_container_width=True, key="bulk_create"):
+        config.save_config()
+        topics = [t.strip() for t in (bulk_topics or "").splitlines() if t.strip()]
+        if not topics:
+            st.error(tr("Please enter at least one topic"))
+            st.stop()
+
+        api_base_url = _api_base_url()
+        public_api_base_url = _public_api_base_url()
+
+        for topic in topics:
+            try:
+                p = params.model_copy(deep=True)
+            except Exception:
+                p = VideoParams(**params.model_dump(mode="json"))
+
+            p.video_subject = topic
+            p.video_script = ""
+            p.video_materials = None
+            if bool(st.session_state.get("force_regen_terms", False)):
+                p.video_terms = None
+
+            try:
+                create_resp = requests.post(
+                    f"{api_base_url}/api/v1/videos",
+                    headers=_api_headers(),
+                    json=p.model_dump(mode="json"),
+                    timeout=30,
+                )
+                create_resp.raise_for_status()
+                create_body = create_resp.json() if create_resp.content else {}
+                task_id = (create_body.get("data") or {}).get("task_id")
+                if not task_id:
+                    bulk_failed.append({"topic": topic, "error": "no task_id"})
+                    continue
+
+                bulk_created.append({"topic": topic, "task_id": task_id})
+
+                if bulk_wait:
+                    while True:
+                        task_resp = requests.get(
+                            f"{api_base_url}/api/v1/tasks/{task_id}",
+                            headers=_api_headers(),
+                            timeout=30,
+                        )
+                        task_resp.raise_for_status()
+                        task_body = task_resp.json() if task_resp.content else {}
+                        task = task_body.get("data") or {}
+                        state = int(task.get("state") or 0)
+                        if state in (-1, 1):
+                            break
+                        time.sleep(1)
+            except Exception as e:
+                bulk_failed.append({"topic": topic, "error": str(e)})
+
+        if bulk_created:
+            st.success(tr("Bulk tasks created"))
+            for row in bulk_created:
+                url = _task_file_url(public_api_base_url, row["task_id"], "")
+                st.write(f"{row['topic']} => {row['task_id']}")
+                st.link_button(tr("Open Task Folder"), url.rstrip("/"))
+
+        if bulk_failed:
+            st.error(tr("Some tasks failed to create"))
+            st.code("\n".join([f"{r['topic']}: {r['error']}" for r in bulk_failed]))
+
+with st.expander(tr("Clip Review (Preflight)"), expanded=False):
+    if params.video_source not in ("pexels", "pixabay"):
+        st.info(tr("Clip review is available for Pexels/Pixabay sources."))
+    else:
+        clip_limit = st.slider(
+            tr("Clips per sentence"),
+            min_value=2,
+            max_value=10,
+            value=int(config.ui.get("preflight_clip_limit", 6) or 6),
+            key="preflight_clip_limit",
+        )
+        config.ui["preflight_clip_limit"] = int(clip_limit)
+
+        minimum_duration = int(params.video_clip_duration or 3)
+
+        if "preflight_search_log" not in st.session_state:
+            st.session_state["preflight_search_log"] = []
+
+        if st.button(tr("Generate Clip Review"), use_container_width=True, key="preflight_generate"):
+            script_text = (params.video_script or "").strip()
+            if not script_text:
+                st.error(tr("Please enter a script first"))
+                st.stop()
+
+            st.session_state["preflight_search_log"] = []
+
+            sentences = _split_sentences(script_text)
+            st.session_state["preflight_sentences"] = sentences
+            terms = []
+            for s in sentences:
+                try:
+                    generated = llm.generate_terms(
+                        video_subject="",
+                        video_script=s,
+                        amount=1,
+                    )
+                    t = ""
+                    if isinstance(generated, list) and generated and isinstance(generated[0], str):
+                        t = generated[0].strip()
+                    terms.append(t)
+                except Exception:
+                    terms.append("")
+            st.session_state["preflight_terms"] = terms
+
+            api_base_url = _api_base_url()
+            results = []
+            picks = []
+            for i, t in enumerate(terms):
+                if not t:
+                    results.append([])
+                    picks.append("")
+                    continue
+                try:
+                    log_entry = {
+                        "section": i + 1,
+                        "provider": params.video_source,
+                        "search_term": t,
+                        "minimum_duration": minimum_duration,
+                        "video_aspect": str(params.video_aspect.value),
+                        "limit": int(clip_limit),
+                    }
+                    items = _search_stock_videos(
+                        api_base_url=api_base_url,
+                        provider=params.video_source,
+                        search_term=t,
+                        minimum_duration=minimum_duration,
+                        video_aspect=str(params.video_aspect.value),
+                        limit=int(clip_limit),
+                    )
+                    results.append(items)
+                    picked_url = items[0]["url"] if items else ""
+                    picks.append(picked_url)
+                    log_entry["result_count"] = len(items or [])
+                    log_entry["picked_url"] = picked_url
+                    st.session_state["preflight_search_log"].append(log_entry)
+                    logger.info(utils.to_json({"event": "preflight_pick", **log_entry}))
+                except Exception:
+                    results.append([])
+                    picks.append("")
+
+            st.session_state["preflight_results"] = results
+            st.session_state["preflight_picks"] = picks
+
+        sentences = st.session_state.get("preflight_sentences") or []
+        terms = st.session_state.get("preflight_terms") or []
+        results = st.session_state.get("preflight_results") or []
+        picks = st.session_state.get("preflight_picks") or []
+
+        if sentences:
+            st.write(tr("Review each section, adjust keywords, and choose a clip."))
+            api_base_url = _api_base_url()
+
+            show_debug = st.checkbox(
+                tr("Show Clip Review Debug Log"),
+                value=bool(st.session_state.get("preflight_show_debug", False)),
+                key="preflight_show_debug",
+            )
+            if show_debug:
+                try:
+                    lines = [
+                        utils.to_json(x)
+                        for x in (st.session_state.get("preflight_search_log") or [])
+                    ]
+                    if lines:
+                        st.code("\n".join(lines))
+                    else:
+                        st.info(tr("No searches yet"))
+                except Exception:
+                    st.info(tr("No searches yet"))
+
+            persist_debug = st.checkbox(
+                tr("Persist Clip Review Debug Log to file"),
+                value=bool(st.session_state.get("preflight_persist_debug", False)),
+                key="preflight_persist_debug",
+            )
+            if persist_debug:
+                try:
+                    debug_lines = [
+                        utils.to_json(x)
+                        for x in (st.session_state.get("preflight_search_log") or [])
+                    ]
+                    debug_text = "\n".join(debug_lines)
+
+                    debug_dir = os.path.join(root_dir, "debug_logs")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    debug_filename = f"clip-review-{time.strftime('%Y%m%d-%H%M%S')}.log"
+                    debug_path = os.path.join(debug_dir, debug_filename)
+
+                    save_cols = st.columns([0.3, 0.7])
+                    with save_cols[0]:
+                        if st.button(tr("Save Debug Log"), key="preflight_save_debug"):
+                            with open(debug_path, "w", encoding="utf-8") as f:
+                                f.write(debug_text)
+                            st.success(tr("Debug log saved"))
+                    with save_cols[1]:
+                        st.write(debug_path)
+                        if debug_text:
+                            st.download_button(
+                                label=tr("Download Debug Log"),
+                                data=debug_text,
+                                file_name=debug_filename,
+                                mime="text/plain",
+                                key="preflight_download_debug",
+                            )
+                except Exception as e:
+                    st.error(tr("Failed to persist debug log"))
+                    logger.exception(e)
+
+            for i, sentence in enumerate(sentences):
+                st.divider()
+                st.write(f"{tr('Section')} {i+1}")
+                st.write(sentence)
+
+                term_key = f"preflight_term_{i}"
+                default_term = terms[i] if i < len(terms) else ""
+                term_val = st.text_input(
+                    tr("Keyword"),
+                    value=str(st.session_state.get(term_key, default_term) or ""),
+                    key=term_key,
+                ).strip()
+
+                cols = st.columns([0.2, 0.8])
+                with cols[0]:
+                    if st.button(tr("Search"), key=f"preflight_search_{i}"):
+                        try:
+                            log_entry = {
+                                "section": i + 1,
+                                "provider": params.video_source,
+                                "search_term": term_val,
+                                "minimum_duration": minimum_duration,
+                                "video_aspect": str(params.video_aspect.value),
+                                "limit": int(clip_limit),
+                            }
+                            items = _search_stock_videos(
+                                api_base_url=api_base_url,
+                                provider=params.video_source,
+                                search_term=term_val,
+                                minimum_duration=minimum_duration,
+                                video_aspect=str(params.video_aspect.value),
+                                limit=int(clip_limit),
+                            )
+                            while len(results) <= i:
+                                results.append([])
+                            results[i] = items
+                            while len(picks) <= i:
+                                picks.append("")
+                            picked_url = items[0]["url"] if items else ""
+                            picks[i] = picked_url
+                            st.session_state["preflight_results"] = results
+                            st.session_state["preflight_picks"] = picks
+
+                            log_entry["result_count"] = len(items or [])
+                            log_entry["picked_url"] = picked_url
+                            st.session_state["preflight_search_log"].append(log_entry)
+                            logger.info(utils.to_json({"event": "preflight_pick", **log_entry}))
+                        except Exception as e:
+                            st.error(tr("Search failed"))
+                            logger.exception(e)
+                with cols[1]:
+                    items = results[i] if i < len(results) else []
+                    candidates = [it for it in items if isinstance(it, dict) and it.get("url")]
+                    picked_default = picks[i] if i < len(picks) else ""
+
+                    while len(picks) <= i:
+                        picks.append("")
+
+                    if not candidates:
+                        st.info(tr("No clips found for this keyword"))
+                    else:
+                        limited_candidates = candidates[: int(clip_limit)]
+                        clips_per_row = 3
+                        num_rows = (len(limited_candidates) + clips_per_row - 1) // clips_per_row
+                        
+                        for row_idx in range(num_rows):
+                            start_idx = row_idx * clips_per_row
+                            end_idx = min(start_idx + clips_per_row, len(limited_candidates))
+                            row_candidates = limited_candidates[start_idx:end_idx]
+                            
+                            thumb_cols = st.columns(len(row_candidates))
+                            for col_idx, cand in enumerate(row_candidates):
+                                k = start_idx + col_idx
+                                url = str(cand.get("url") or "")
+                                thumb = str(cand.get("thumbnail") or "")
+                                dur = cand.get("duration")
+                                with thumb_cols[col_idx]:
+                                    if thumb:
+                                        st.image(thumb, use_container_width=True)
+                                    st.caption(f"{tr('Duration')}: {dur}" if dur else "")
+                                    is_selected = bool(picks[i] == url) or (
+                                        not picks[i] and picked_default == url
+                                    )
+                                    label = tr("Selected") if is_selected else tr("Select")
+                                    if st.button(label, key=f"preflight_pick_btn_{i}_{k}"):
+                                        picks[i] = url
+                                        st.session_state["preflight_picks"] = picks
+                                        try:
+                                            st.session_state["preflight_search_log"].append(
+                                                {
+                                                    "section": i + 1,
+                                                    "provider": params.video_source,
+                                                    "picked_url": url,
+                                                    "picked_thumbnail": thumb,
+                                                }
+                                            )
+                                        except Exception:
+                                            pass
+
+                        if picks[i]:
+                            st.write(f"{tr('Picked')}: {picks[i]}")
+
+            if st.button(tr("Apply Selected Clips"), use_container_width=True, key="preflight_apply"):
+                applied_terms = []
+                for i in range(len(sentences)):
+                    t = (st.session_state.get(f"preflight_term_{i}") or "").strip()
+                    if t:
+                        applied_terms.append(t)
+                    else:
+                        applied_terms.append("")
+                st.session_state["selected_sentence_terms"] = applied_terms
+                selected = [u for u in (st.session_state.get("preflight_picks") or []) if u]
+                st.session_state["selected_clip_urls"] = selected
+                st.success(tr("Selected clips applied. Now click Generate Video."))
+
 start_button = st.button(tr("Generate Video"), use_container_width=True, type="primary")
 if start_button:
     config.save_config()
+    applied_sentence_terms = st.session_state.get("selected_sentence_terms")
+    if isinstance(applied_sentence_terms, list) and applied_sentence_terms:
+        params.video_terms = [str(t).strip() for t in applied_sentence_terms if str(t).strip()]
+    elif bool(st.session_state.get("force_regen_terms", False)):
+        params.video_terms = None
+    selected_clip_urls = st.session_state.get("selected_clip_urls") or []
+    if selected_clip_urls:
+        params.video_materials = []
+        for u in selected_clip_urls:
+            m = MaterialInfo()
+            m.provider = params.video_source
+            m.url = u
+            m.duration = 0
+            params.video_materials.append(m)
     if not params.video_subject and not params.video_script:
         st.error(tr("Video Script and Subject Cannot Both Be Empty"))
         scroll_to_bottom()
@@ -1245,6 +1815,7 @@ if start_button:
 
     st.toast(tr("Generating Video"))
     logger.info(tr("Start Generating Video"))
+    logger.info(f"[PARAMS DEBUG] sentence_level_clips value before API call: {params.sentence_level_clips}")
     logger.info(utils.to_json(params))
     scroll_to_bottom()
 
@@ -1345,16 +1916,86 @@ with st.expander(tr("Task Browser"), expanded=False):
                 st.info(tr("No files found in task"))
             else:
                 public_api_base_url = _public_api_base_url()
+
+                script_data = {}
+                materials_data = {}
+                try:
+                    script_file = task_path / "script.json"
+                    if script_file.exists():
+                        script_data = json.loads(script_file.read_text(encoding="utf-8"))
+                except Exception:
+                    script_data = {}
+                try:
+                    materials_file = task_path / "materials.json"
+                    if materials_file.exists():
+                        materials_data = json.loads(
+                            materials_file.read_text(encoding="utf-8")
+                        )
+                except Exception:
+                    materials_data = {}
+
+                script_text = (script_data.get("script") or "").strip()
+                terms = script_data.get("search_terms") or []
+                if isinstance(terms, str):
+                    terms = [t.strip() for t in re.split(r"[,，]", terms) if t.strip()]
+                if not isinstance(terms, list):
+                    terms = []
+                sentences = _split_sentences(script_text)
+
+                manifest_items = []
+                try:
+                    manifest_items = (materials_data.get("materials") or [])
+                    if not isinstance(manifest_items, list):
+                        manifest_items = []
+                except Exception:
+                    manifest_items = []
+
+                if manifest_items and (sentences or terms):
+                    st.subheader(tr("Clip Breakdown"))
+                    per_row = 3
+                    for row_start in range(0, len(manifest_items), per_row):
+                        row_cols = st.columns(per_row)
+                        for j in range(per_row):
+                            i = row_start + j
+                            if i >= len(manifest_items):
+                                continue
+                            item = manifest_items[i]
+                            filename = (item or {}).get("filename") or ""
+                            sentence = sentences[i] if i < len(sentences) else ""
+                            term = terms[i] if i < len(terms) else ""
+
+                            url = ""
+                            if filename and (task_path / filename).exists():
+                                url = _task_file_url(
+                                    public_api_base_url, selected_task_id, filename
+                                )
+
+                            with row_cols[j]:
+                                with st.container(border=True):
+                                    if term:
+                                        st.write(f"{tr('Keyword')}: {term}")
+                                    if url:
+                                        st.video(url)
+                                    else:
+                                        st.code(str((item or {}).get("path") or ""))
+                                    if sentence:
+                                        st.write(sentence)
+
+                show_inline_media_previews = not bool(
+                    manifest_items and (sentences or terms)
+                )
+
                 for p in files:
                     filename = p.name
                     url = _task_file_url(public_api_base_url, selected_task_id, filename)
                     st.write(f"{filename}  ")
                     st.link_button(tr("Open"), url)
                     lower = filename.lower()
-                    if lower.endswith((".mp4", ".mov", ".mkv", ".webm")):
-                        st.video(url)
-                    elif lower.endswith((".mp3", ".wav", ".m4a", ".aac", ".flac")):
-                        st.audio(url)
+                    if show_inline_media_previews:
+                        if lower.endswith((".mp4", ".mov", ".mkv", ".webm")):
+                            st.video(url)
+                        elif lower.endswith((".mp3", ".wav", ".m4a", ".aac", ".flac")):
+                            st.audio(url)
         except Exception as e:
             st.error(tr("Failed to load task files"))
             logger.exception(e)

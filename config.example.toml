@@ -224,3 +224,9 @@ api_key = ""
 # 是否隐藏日志信息
 # Whether to hide logs in the UI
 hide_log = false
+
+# When true, generate stock clips per sentence (best-effort) for better script/video matching
+sentence_level_clips = false
+
+# Max number of sentences to generate terms/clips for when sentence_level_clips is enabled
+max_sentence_terms = 30

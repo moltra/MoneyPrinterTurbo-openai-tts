@@ -50,7 +50,10 @@ class _Config:
 class MaterialInfo:
     provider: str = "pexels"
     url: str = ""
+    thumbnail: str = ""
     duration: int = 0
+    video_id: str = ""
+    tags: str = ""
 
 
 class VideoParams(BaseModel):
@@ -81,6 +84,7 @@ class VideoParams(BaseModel):
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
+    sentence_level_clips: Optional[bool] = False
     
     custom_audio_file: Optional[str] = None  # Custom audio file path, will ignore video_script and disable subtitle
     video_language: Optional[str] = ""  # auto detect
@@ -187,6 +191,18 @@ class VideoScriptRequest(VideoScriptParams, BaseModel):
 
 
 class VideoTermsRequest(VideoTermsParams, BaseModel):
+    pass
+
+
+class StockVideoSearchParams:
+    provider: str = "pexels"  # pexels | pixabay
+    search_term: str = ""
+    minimum_duration: int = 3
+    video_aspect: Optional[VideoAspect] = VideoAspect.portrait.value
+    limit: int = 20
+
+
+class StockVideoSearchRequest(StockVideoSearchParams, BaseModel):
     pass
 
 
@@ -331,4 +347,18 @@ class VideoMaterialUploadResponse(BaseResponse):
                     "file": "/MoneyPrinterTurbo/resource/videos/example.mp4",
                 },
             },
+        }
+
+class StockVideoSearchResponse(BaseResponse):
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": 200,
+                "message": "success",
+                "data": {
+                    "items": [
+                        {"provider": "pexels", "url": "https://...", "duration": 12}
+                    ]
+                },
+            }
         }

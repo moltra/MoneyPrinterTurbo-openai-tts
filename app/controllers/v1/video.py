@@ -19,6 +19,8 @@ from app.models.schema import (
     AudioRequest,
     BgmRetrieveResponse,
     BgmUploadResponse,
+    StockVideoSearchRequest,
+    StockVideoSearchResponse,
     SubtitleRequest,
     TaskDeletionResponse,
     TaskQueryRequest,
@@ -29,6 +31,7 @@ from app.models.schema import (
     VideoMaterialRetrieveResponse
 )
 from app.services import state as sm
+from app.services import material
 from app.services import task as tm
 from app.utils import utils
 
@@ -285,6 +288,45 @@ def upload_video_material_file(request: Request, file: UploadFile = File(...)):
     raise HttpException(
         "", status_code=400, message=f"{request_id}: Only files with extensions {', '.join(allowed_suffixes)} can be uploaded"
     )
+
+
+@router.post(
+    "/stock_videos/search",
+    response_model=StockVideoSearchResponse,
+    summary="Search stock video clips (Pexels/Pixabay) for preview",
+)
+def search_stock_videos(request: Request, body: StockVideoSearchRequest):
+    request_id = base.get_task_id(request)
+    provider = (body.provider or "").strip().lower()
+    if provider not in ("pexels", "pixabay"):
+        raise HttpException("", status_code=400, message=f"{request_id}: invalid provider")
+    term = (body.search_term or "").strip()
+    if not term:
+        raise HttpException("", status_code=400, message=f"{request_id}: search_term required")
+
+    minimum_duration = int(body.minimum_duration or 0)
+    limit = int(body.limit or 20)
+    limit = max(1, min(limit, 50))
+    items = []
+    try:
+        if provider == "pixabay":
+            items = material.search_videos_pixabay(
+                search_term=term,
+                minimum_duration=minimum_duration,
+                video_aspect=body.video_aspect,
+            )
+        else:
+            items = material.search_videos_pexels(
+                search_term=term,
+                minimum_duration=minimum_duration,
+                video_aspect=body.video_aspect,
+            )
+    except Exception as e:
+        logger.exception(e)
+        raise HttpException("", status_code=500, message=f"{request_id}: search failed") from e
+
+    response = {"items": [i.__dict__ for i in (items or [])[:limit]]}
+    return utils.get_response(200, response)
 
 
 @router.get("/stream/{file_path:path}")
