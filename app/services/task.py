@@ -349,6 +349,8 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
         retention=None,
     )
     
+    task_failed = False
+    
     try:
         logger.info(f"start task: {task_id}, stop_at: {stop_at}")
         logger.info(f"task log file: {task_log_path}")
@@ -476,9 +478,22 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
             task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs
         )
         return kwargs
+    except Exception as e:
+        task_failed = True
+        logger.error(f"Task {task_id} failed with exception: {str(e)}")
+        logger.exception(e)
+        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        raise
     finally:
         # Remove the file handler to prevent memory leaks
         logger.remove(log_handler_id)
+        
+        # Force garbage collection to clean up any unreferenced resources
+        import gc
+        gc.collect()
+        
+        if task_failed:
+            logger.warning(f"Task {task_id} cleanup completed after failure")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 import numpy as np
 
 from app.models.schema import MaterialInfo, VideoAspect
+from app.models.video_constants import SemanticConstants, VideoConstants
 from app.services import material
 from app.config import config
 from app.utils import utils
@@ -21,7 +22,7 @@ class ClipRelevanceScorer:
         self._model = None
         self._cache_dir = os.path.join(utils.storage_dir("cache"), "clip_relevance")
         os.makedirs(self._cache_dir, exist_ok=True)
-        self._cache_ttl = 7 * 24 * 3600  # 7 days
+        self._cache_ttl = VideoConstants.CACHE_TTL_DAYS * 24 * 3600
 
     @property
     def model(self):
@@ -74,8 +75,8 @@ class ClipRelevanceScorer:
         if main_keyword:
             queries.append(main_keyword.strip())
         
-        # Query 2: First 6 words of sentence (visual concepts)
-        words = sentence.split()[:6]
+        # Query 2: First N words of sentence (visual concepts)
+        words = sentence.split()[:6]  # Extract key visual concepts
         if words:
             queries.append(" ".join(words))
         
@@ -93,7 +94,7 @@ class ClipRelevanceScorer:
                 seen.add(q_lower)
                 unique_queries.append(q)
         
-        return unique_queries[:3]  # Max 3 queries
+        return unique_queries[:SemanticConstants.DEFAULT_QUERIES_PER_SENTENCE]
 
     def _fetch_candidates(
         self,
@@ -280,8 +281,9 @@ class ClipRelevanceScorer:
         
         # Pick top candidate
         top = scored_candidates[0]
-        logger.info(f"[SEMANTIC] Top 3 candidates:")
-        for i, cand in enumerate(scored_candidates[:3]):
+        top_n = min(3, len(scored_candidates))
+        logger.info(f"[SEMANTIC] Top {top_n} candidates:")
+        for i, cand in enumerate(scored_candidates[:top_n]):
             logger.info(f"[SEMANTIC]   {i+1}. score={cand['score']:.3f} duration={cand['duration']}s provider={cand['provider']}")
             logger.info(f"[SEMANTIC]      url={cand['url'][:80]}...")
         logger.info(f"[SEMANTIC] PICKED: score={top['score']:.3f} url={top['url']}")
@@ -292,7 +294,7 @@ class ClipRelevanceScorer:
             "picked_provider": top["provider"],
             "picked_duration": top["duration"],
             "relevance_score": top["score"],
-            "candidates": scored_candidates[:3],  # Top 3 for logging
+            "candidates": scored_candidates[:top_n],  # Top N for logging
             "search_queries": queries,
             "cached": False,
         }

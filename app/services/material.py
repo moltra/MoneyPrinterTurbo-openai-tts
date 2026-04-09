@@ -9,7 +9,10 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 
 from app.config import config
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
+from app.models.video_constants import VideoConstants, APIConstants
 from app.utils import utils
+from app.utils.logging import sanitize_url
+from app.utils.video_validator import validate_video_file
 
 requested_count = 0
 
@@ -45,7 +48,7 @@ def search_videos_pexels(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
     }
     # Build URL
-    params = {"query": search_term, "per_page": 20, "orientation": video_orientation}
+    params = {"query": search_term, "per_page": APIConstants.PEXELS_DEFAULT_PER_PAGE, "orientation": video_orientation}
     query_url = f"https://api.pexels.com/videos/search?{urlencode(params)}"
     logger.info(f"[PEXELS API] Searching: {query_url}")
     logger.info(f"[PEXELS API] Search term: '{search_term}' | orientation: {video_orientation} | min_duration: {minimum_duration}s")
@@ -114,10 +117,10 @@ def search_videos_pixabay(
         "key": api_key,
         "q": search_term,
         "video_type": "all",  # Accepted values: "all", "film", "animation"
-        "per_page": 20,
+        "per_page": APIConstants.PIXABAY_DEFAULT_PER_PAGE,
     }
     query_url = f"https://pixabay.com/api/videos/?{urlencode(params)}"
-    logger.info(f"[PIXABAY API] Searching: {query_url.replace(api_key, 'XXX')}")
+    logger.info(f"[PIXABAY API] Searching: {sanitize_url(query_url)}")
     logger.info(f"[PIXABAY API] Search term: '{search_term}' | aspect: {video_aspect.value} | min_duration: {minimum_duration}s")
 
     try:
@@ -203,21 +206,17 @@ def save_video(video_url: str, save_dir: str = "") -> str:
             ).content
         )
 
-    if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+    # Validate the downloaded video
+    if validate_video_file(video_path):
+        return video_path
+    else:
+        # Remove corrupted file
         try:
-            clip = VideoFileClip(video_path)
-            duration = clip.duration
-            fps = clip.fps
-            clip.close()
-            if duration > 0 and fps > 0:
-                return video_path
+            os.remove(video_path)
+            logger.warning(f"Removed corrupted video file: {video_path}")
         except Exception as e:
-            try:
-                os.remove(video_path)
-            except Exception:
-                pass
-            logger.warning(f"invalid video file: {video_path} => {str(e)}")
-    return ""
+            logger.error(f"Failed to remove corrupted video: {str(e)}")
+        return ""
 
 
 def download_videos(

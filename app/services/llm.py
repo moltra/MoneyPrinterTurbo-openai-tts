@@ -10,6 +10,7 @@ from openai import AzureOpenAI, OpenAI
 from openai.types.chat import ChatCompletion
 
 from app.config import config
+from app.utils.logging import sanitize_log_data
 
 _max_retries = 5
 
@@ -264,7 +265,7 @@ def _generate_response(prompt: str) -> str:
                     },
                 )
                 result = response.json()
-                logger.info(result)
+                logger.info(sanitize_log_data(result))
                 return result["result"]["response"]
 
             if llm_provider == "ernie":

@@ -80,3 +80,15 @@ def shutdown_event():
 @app.on_event("startup")
 def startup_event():
     logger.info("startup event")
+    
+    # Warmup semantic model to avoid first-request latency
+    try:
+        from app.services.relevance import get_scorer
+        logger.info("Warming up semantic scoring model...")
+        scorer = get_scorer()
+        # Access the model to trigger lazy loading
+        _ = scorer.model
+        logger.success("Semantic model warmup complete")
+    except Exception as e:
+        logger.warning(f"Semantic model warmup failed (non-fatal): {str(e)}")
+        logger.warning("Model will be loaded on first use")

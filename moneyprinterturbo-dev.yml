@@ -19,7 +19,20 @@ services:
       - ${MPT_REPO_DIR:-/mnt/data/repos/MoneyPrinterTurbo-openai-tts}:/MoneyPrinterTurbo
       - $DOCKERDIR/appdata/moneyprinterturbo-dev/config/config.toml:/MoneyPrinterTurbo/config.toml
       - /mnt/data/storage:/MoneyPrinterTurbo/storage
-
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
     command: ["uvicorn", "app.asgi:app", "--host=0.0.0.0", "--port=8080"]
 
   moneyprinterturbo-dev-webui:
@@ -44,6 +57,21 @@ services:
       - ${MPT_REPO_DIR:-/mnt/data/repos/MoneyPrinterTurbo-openai-tts}:/MoneyPrinterTurbo
       - $DOCKERDIR/appdata/moneyprinterturbo-dev/config/config.toml:/MoneyPrinterTurbo/config.toml
       - /mnt/data/storage:/MoneyPrinterTurbo/storage
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
     depends_on:
-      - moneyprinterturbo-dev-api
+      moneyprinterturbo-dev-api:
+        condition: service_healthy
     command: ["streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.enableCORS=True", "--browser.gatherUsageStats=False"]

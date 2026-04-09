@@ -4,16 +4,14 @@ FROM python:3.11-slim-bullseye
 # Set the working directory in the container
 WORKDIR /MoneyPrinterTurbo
 
-# 设置/MoneyPrinterTurbo目录权限为777
-RUN chmod 777 /MoneyPrinterTurbo
-
 ENV PYTHONPATH="/MoneyPrinterTurbo"
 
-# Install system dependencies
+# Install system dependencies including gosu for user switching
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         imagemagick \
         ffmpeg \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Fix security policy for ImageMagick
@@ -28,8 +26,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Now copy the rest of the codebase into the image
 COPY . .
 
+# Copy and set up entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Expose the port the app runs on
 EXPOSE 8501
+
+# Set entrypoint to handle user creation
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Command to run the application
 CMD ["streamlit", "run", "./webui/Main.py","--browser.serverAddress=127.0.0.1","--server.enableCORS=True","--browser.gatherUsageStats=False"]

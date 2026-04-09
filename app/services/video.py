@@ -29,6 +29,7 @@ from app.models.schema import (
     VideoParams,
     VideoTransitionMode,
 )
+from app.models.video_quality import get_video_quality_config
 from app.services.utils import video_effects
 from app.config import config
 from app.utils import utils
@@ -55,28 +56,38 @@ fps = 30
 
 
 def _get_video_codec() -> str:
+    """
+    Get video codec, using quality presets if configured, otherwise legacy config
+    """
+    # Check for legacy video_codec config first (backward compatibility)
     codec = (config.app.get("video_codec", "") or "").strip()
-    return codec or video_codec
+    if codec:
+        return codec
+    
+    # Use quality preset
+    quality = config.app.get("video_quality", "medium")
+    quality_config = get_video_quality_config(quality)
+    return quality_config.codec
 
 
 def _get_video_ffmpeg_params(codec: str) -> List[str]:
+    """
+    Get ffmpeg parameters, using quality presets if configured, otherwise legacy config
+    """
+    # Check for legacy video_ffmpeg_params config first (backward compatibility)
     params = config.app.get("video_ffmpeg_params")
-    if isinstance(params, list):
+    if isinstance(params, list) and len(params) > 0:
         return [str(x) for x in params if str(x).strip()]
-
+    
+    # Use quality preset
+    quality = config.app.get("video_quality", "medium")
+    quality_config = get_video_quality_config(quality)
+    
+    # Add pixel format for compatibility
     if codec in {"h264_nvenc", "hevc_nvenc"}:
-        return [
-            "-preset",
-            "p4",
-            "-rc",
-            "vbr",
-            "-cq",
-            "19",
-            "-pix_fmt",
-            "yuv420p",
-        ]
-
-    return []
+        return quality_config.params + ["-pix_fmt", "yuv420p"]
+    
+    return quality_config.params
 
 def close_clip(clip):
     if clip is None:
@@ -168,6 +179,7 @@ def combine_videos(
 
     processed_clips = []
     subclipped_items = []
+    failed_clips = []
     video_duration = 0
     for video_path in video_paths:
         clip = VideoFileClip(video_path)
@@ -263,7 +275,25 @@ def combine_videos(
             video_duration += clip.duration
             
         except Exception as e:
-            logger.error(f"failed to process clip: {str(e)}")
+            logger.error(f"Failed to process clip {i+1}: {subclipped_item.file_path} - {str(e)}")
+            failed_clips.append({
+                'index': i,
+                'path': subclipped_item.file_path,
+                'error': str(e)
+            })
+    
+    # Check if too many clips failed
+    if failed_clips:
+        failure_ratio = len(failed_clips) / len(subclipped_items) if subclipped_items else 0
+        logger.warning(f"Clip processing summary: {len(failed_clips)} failed out of {len(subclipped_items)} ({failure_ratio*100:.1f}%)")
+        
+        from app.models.video_constants import VideoConstants
+        if failure_ratio > VideoConstants.MAX_CLIP_FAILURE_RATIO:
+            close_clip(audio_clip)
+            raise Exception(
+                f"Too many clip failures: {len(failed_clips)}/{len(subclipped_items)} "
+                f"({failure_ratio*100:.1f}% > {VideoConstants.MAX_CLIP_FAILURE_RATIO*100:.0f}% threshold)"
+            )
     
     # loop processed clips until the video duration matches or exceeds the audio duration.
     if video_duration < audio_duration:

@@ -4,6 +4,13 @@ project_version = "1.2.7-selfhosted.1"
 [app]
 video_source = "pexels" # "pexels" or "pixabay"
 
+# Video quality preset: low, medium, high, gpu_nvenc
+# - low: Fast encoding (CRF 28, preset fast) - good for previews
+# - medium: Balanced quality (CRF 23, preset medium) - recommended default
+# - high: High quality (CRF 18, preset slow) - best output, slower encoding
+# - gpu_nvenc: Hardware accelerated (NVIDIA GPU required) - fast encoding with good quality
+video_quality = "medium"
+
 # 是否隐藏配置面板
 hide_config = false
 
