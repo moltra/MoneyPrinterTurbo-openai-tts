@@ -14,7 +14,7 @@ __pycache__
 logs/
 /org_repo/.git
 
-
+# Node modules
 node_modules
 # VuePress 默认临时文件目录
 /sites/docs/.vuepress/.temp
@@ -26,12 +26,41 @@ node_modules
 /models/
 ./models/*
 
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Virtual environments
 venv/
 .venv
+env/
+ENV/
+
+# Logs
+logs/
+*.log
+streamlit.log
+/storage/logs/
 
 # Debug and test files
 CLAUDE.md
 debug/
 debug_*.py
 test_*.py
-streamlit.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

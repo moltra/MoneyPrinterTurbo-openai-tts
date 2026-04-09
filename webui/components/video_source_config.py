@@ -35,50 +35,45 @@ def render_video_source_config() -> None:
     st.write(tr("Video Source Settings"))
     
     # Pexels configuration
+    # Convert list to comma-separated string for display
     pexels_keys = _get_keys_from_config("pexels_api_keys")
+    # Store joined value temporarily so render_secure_api_key_input can read it
+    config.app["pexels_api_keys_joined"] = ", ".join(pexels_keys) if pexels_keys else ""
     
-    # Show masked current keys
-    if pexels_keys:
-        display_value = ", ".join([mask_sensitive_value(k, visible_chars=4) for k in pexels_keys])
-    else:
-        display_value = ""
-    
-    pexels_input = st.text_input(
-        tr("Pexels API Key"),
-        value=display_value,
-        type="password",
-        help=tr("Enter one or more API keys separated by commas. Previously configured keys are shown masked.")
+    was_updated_pexels, new_pexels = render_secure_api_key_input(
+        label=tr("Pexels API Key"),
+        config_key="pexels_api_keys_joined",
+        help_text=tr("Enter one or more API keys separated by commas"),
+        key="pexels_api_key_input"
     )
     
-    # Only update if user entered something different
-    if pexels_input and not pexels_input.startswith("•"):
-        _save_keys_to_config("pexels_api_keys", pexels_input)
-    elif not pexels_input and pexels_keys:
-        # User cleared all keys
-        config.app["pexels_api_keys"] = []
+    if was_updated_pexels:
+        if new_pexels:
+            _save_keys_to_config("pexels_api_keys", new_pexels)
+        else:
+            config.app["pexels_api_keys"] = []
+        # Clean up temp key
+        config.app.pop("pexels_api_keys_joined", None)
     
     # Pixabay configuration
     pixabay_keys = _get_keys_from_config("pixabay_api_keys")
+    # Store joined value temporarily so render_secure_api_key_input can read it
+    config.app["pixabay_api_keys_joined"] = ", ".join(pixabay_keys) if pixabay_keys else ""
     
-    # Show masked current keys
-    if pixabay_keys:
-        display_value = ", ".join([mask_sensitive_value(k, visible_chars=4) for k in pixabay_keys])
-    else:
-        display_value = ""
-    
-    pixabay_input = st.text_input(
-        tr("Pixabay API Key"),
-        value=display_value,
-        type="password",
-        help=tr("Enter one or more API keys separated by commas. Previously configured keys are shown masked.")
+    was_updated_pixabay, new_pixabay = render_secure_api_key_input(
+        label=tr("Pixabay API Key"),
+        config_key="pixabay_api_keys_joined",
+        help_text=tr("Enter one or more API keys separated by commas"),
+        key="pixabay_api_key_input"
     )
     
-    # Only update if user entered something different
-    if pixabay_input and not pixabay_input.startswith("•"):
-        _save_keys_to_config("pixabay_api_keys", pixabay_input)
-    elif not pixabay_input and pixabay_keys:
-        # User cleared all keys
-        config.app["pixabay_api_keys"] = []
+    if was_updated_pixabay:
+        if new_pixabay:
+            _save_keys_to_config("pixabay_api_keys", new_pixabay)
+        else:
+            config.app["pixabay_api_keys"] = []
+        # Clean up temp key
+        config.app.pop("pixabay_api_keys_joined", None)
     
     # Save config
     config.save_config()

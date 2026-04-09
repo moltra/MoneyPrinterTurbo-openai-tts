@@ -20,7 +20,7 @@ def render_secure_api_key_input(
     key: str = None
 ) -> Tuple[bool, Optional[str]]:
     """
-    Render a secure API key input field
+    Render a secure API key input field with show/hide toggle
     Never pre-fills with actual key, only shows masked placeholder
     
     Args:
@@ -35,25 +35,59 @@ def render_secure_api_key_input(
     current_value = config.app.get(config_key, "")
     has_existing = bool(current_value)
     
+    # Session state key for show/hide toggle
+    show_key = f"show_{config_key}_{key or config_key}"
+    if show_key not in st.session_state:
+        st.session_state[show_key] = False
+    
     # Show help text indicating if key is already configured
     if has_existing:
-        display_help = f"Previously configured. {help_text}" if help_text else "Previously configured"
+        display_help = f"✓ Previously configured. {help_text}" if help_text else "✓ Previously configured"
     else:
         display_help = help_text if help_text else "Enter API key"
     
-    # Never show the actual key, only masked value if exists
-    display_value = MASKED_VALUE if has_existing else ""
+    # Create columns for input and show/hide button
+    col1, col2 = st.columns([5, 1])
     
-    new_value = st.text_input(
-        label,
-        value=display_value,
-        type="password",
-        help=display_help,
-        key=key
-    )
+    with col1:
+        # Always use default type to avoid Streamlit's built-in password toggle
+        # We'll manually mask the value with dots
+        if st.session_state[show_key] and has_existing:
+            # Show actual value (unmasked)
+            display_value = current_value
+        else:
+            # Show masked value or empty
+            display_value = MASKED_VALUE if has_existing else ""
+        
+        new_value = st.text_input(
+            label,
+            value=display_value,
+            type="default",  # Always use default to avoid duplicate toggle
+            help=display_help,
+            key=key,
+            label_visibility="visible",
+            autocomplete="off"
+        )
+    
+    with col2:
+        # Show/hide toggle button (only if there's an existing key)
+        if has_existing:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacer to align with input
+            # When HIDDEN → show eye icon (👁️) to reveal
+            # When VISIBLE → show slashed eye (🙈) to hide
+            if st.session_state[show_key]:
+                # Currently visible, show hide button
+                if st.button("🙈", key=f"toggle_{show_key}", help="Hide API key", use_container_width=True):
+                    st.session_state[show_key] = False
+                    st.rerun()
+            else:
+                # Currently hidden, show reveal button
+                if st.button("👁️", key=f"toggle_{show_key}", help="Show API key", use_container_width=True):
+                    st.session_state[show_key] = True
+                    st.rerun()
     
     # Only update if user entered something different from placeholder
-    if new_value and new_value != MASKED_VALUE:
+    if new_value and new_value != MASKED_VALUE and new_value != current_value:
         # User entered a new key
         logger.info(f"API key updated for {config_key}")  # NEVER log the actual key
         return True, new_value

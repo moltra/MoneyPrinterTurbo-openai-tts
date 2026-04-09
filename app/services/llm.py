@@ -26,23 +26,39 @@ def _ollama_api_generate_endpoint() -> str:
 
 
 def unload_ollama_model(model_name: str) -> None:
+    """
+    Unload Ollama model from memory.
+    Uses keep_alive setting from config to control unload behavior.
+    """
     if not model_name:
         return
     try:
+        # Get keep_alive setting from config (in minutes)
+        # 0 = unload immediately, 5 = default (5 min), -1 = keep forever
+        keep_alive_minutes = config.app.get("ollama_keep_alive_minutes", 5)
+        
+        # Convert to Ollama's keep_alive format
+        if keep_alive_minutes == -1:
+            keep_alive = -1  # Keep forever
+        elif keep_alive_minutes == 0:
+            keep_alive = 0  # Unload immediately
+        else:
+            keep_alive = f"{keep_alive_minutes}m"  # e.g., "5m"
+        
         url = _ollama_api_generate_endpoint()
         requests.post(
             url,
             json={
                 "model": model_name,
                 "prompt": "",
-                "keep_alive": 0,
+                "keep_alive": keep_alive,
                 "stream": False,
             },
             timeout=5,
         )
-        logger.info(f"ollama model unload requested: {model_name}")
+        logger.info(f"ollama model keep_alive set to: {keep_alive}")
     except Exception as e:
-        logger.warning(f"ollama model unload failed: {e}")
+        logger.warning(f"ollama model keep_alive update failed: {e}")
 
 
 def _generate_response(prompt: str) -> str:

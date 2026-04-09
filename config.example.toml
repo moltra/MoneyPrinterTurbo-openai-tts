@@ -57,6 +57,11 @@ pollinations_model_name = "openai-fast"
 ollama_base_url = ""
 # Check your available models at https://ollama.com/library
 ollama_model_name = ""
+# How long to keep model in memory after generation (in minutes)
+# 0 = unload immediately, 5 = keep for 5 minutes (default), -1 = keep forever
+ollama_keep_alive_minutes = 5
+# Set to true to force unload after each generation (overrides keep_alive)
+ollama_unload_after_generate = false
 
 ########## OpenAI API Key
 # Get your API key at https://platform.openai.com/api-keys

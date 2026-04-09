@@ -8,6 +8,7 @@ from typing import Dict, Optional
 from app.config import config
 from webui.i18n import tr
 from webui.utils.security import render_secure_api_key_input, MASKED_VALUE
+from webui.utils.ollama_helper import fetch_ollama_models, test_ollama_connection
 
 
 # LLM Provider configurations
@@ -97,15 +98,21 @@ LLM_PROVIDER_CONFIGS = {
         "display_name": "Ollama",
         "default_model": "qwen:7b",
         "default_base_url": "http://localhost:11434/v1",
+        "supports_model_fetch": True,
         "help_text_zh": """
             ##### Ollama配置说明
             - **API Key**: 随便填写，比如 123
             - **Base Url**: 一般为 http://localhost:11434/v1
                 - 如果 `MoneyPrinterTurbo` 和 `Ollama` **不在同一台机器上**，需要填写 `Ollama` 机器的IP地址
                 - 如果 `MoneyPrinterTurbo` 是 `Docker` 部署，建议填写 `http://host.docker.internal:11434/v1`
-            - **Model Name**: 使用 `ollama list` 查看，比如 `qwen:7b`
+            - **Model Name**: 可从下拉列表选择，或手动输入
         """,
-        "help_text_en": "##### Ollama Configuration\n- Local LLM server"
+        "help_text_en": """
+            ##### Ollama Configuration
+            - **API Key**: Any value works (e.g., 123)
+            - **Base Url**: Usually http://localhost:11434/v1
+            - **Model Name**: Select from dropdown or enter manually
+        """
     },
     "g4f": {
         "display_name": "G4f",
@@ -271,25 +278,143 @@ def render_llm_config() -> None:
             else:
                 config.app.pop(f"{llm_provider}_secret_key", None)
     
-    # Base URL
-    st_llm_base_url = st.text_input(
-        tr("Base Url"),
-        value=llm_base_url,
-        help=tr("Leave empty for default")
-    )
-    if st_llm_base_url:
-        config.app[f"{llm_provider}_base_url"] = st_llm_base_url
+    # Base URL (skip for Ollama, will be shown with model selection)
+    if llm_provider != "ollama":
+        st_llm_base_url = st.text_input(
+            tr("Base Url"),
+            value=llm_base_url,
+            help=tr("Leave empty for default")
+        )
+        if st_llm_base_url:
+            config.app[f"{llm_provider}_base_url"] = st_llm_base_url
     
     # Model name (not for ERNIE)
     if llm_provider != "ernie":
-        st_llm_model_name = st.text_input(
-            tr("Model Name"),
-            value=llm_model_name,
-            key=f"{llm_provider}_model_name_input",
-            help=tr("Model identifier for this provider")
-        )
-        if st_llm_model_name:
-            config.app[f"{llm_provider}_model_name"] = st_llm_model_name
+        # Special handling for Ollama - fetch models from API
+        if llm_provider == "ollama" and provider_config.get("supports_model_fetch", False):
+            # Show Base URL input for Ollama
+            st_llm_base_url_temp = st.text_input(
+                tr("Base Url"),
+                value=llm_base_url,
+                key=f"{llm_provider}_base_url_input",
+                help=tr("Ollama server URL (e.g., http://localhost:11434/v1 or http://192.168.0.116:11436/v1)")
+            )
+            
+            # Try to fetch models if Base URL is provided
+            available_models = []
+            fetch_error = None
+            
+            if st_llm_base_url_temp:
+                # Store the base URL
+                config.app[f"{llm_provider}_base_url"] = st_llm_base_url_temp
+                
+                # Add refresh button with proper spacing
+                refresh_models = st.button("🔄 " + tr("Refresh Models"), key="refresh_ollama_models", use_container_width=False)
+                
+                # Fetch models on page load or refresh
+                if refresh_models or "ollama_models_cache" not in st.session_state:
+                    with st.spinner(tr("Fetching available models...")):
+                        success, models, error = fetch_ollama_models(st_llm_base_url_temp)
+                        if success:
+                            available_models = models
+                            st.session_state["ollama_models_cache"] = models
+                            if error:
+                                st.info(error)
+                        else:
+                            fetch_error = error
+                            st.session_state["ollama_models_cache"] = []
+                else:
+                    available_models = st.session_state.get("ollama_models_cache", [])
+            
+            # Show error if fetch failed
+            if fetch_error:
+                st.warning(f"⚠️ {fetch_error}")
+                st.caption(tr("You can still enter the model name manually below"))
+            
+            # Model selection
+            if available_models:
+                # Use selectbox if models are available
+                current_model = llm_model_name if llm_model_name in available_models else (available_models[0] if available_models else "")
+                
+                # Show model count
+                st.caption(f"✓ {len(available_models)} " + tr("models found"))
+                
+                st_llm_model_name = st.selectbox(
+                    tr("Model Name"),
+                    options=available_models,
+                    index=available_models.index(current_model) if current_model in available_models else 0,
+                    key=f"{llm_provider}_model_select",
+                    help=tr("Select from available Ollama models")
+                )
+                
+                # Option to enter custom model
+                use_custom = st.checkbox(tr("Use custom model name"), key="ollama_use_custom")
+                if use_custom:
+                    st_llm_model_name = st.text_input(
+                        tr("Custom Model Name"),
+                        value=llm_model_name,
+                        key=f"{llm_provider}_custom_model",
+                        help=tr("Enter model name manually")
+                    )
+            else:
+                # Fallback to text input if no models available
+                st_llm_model_name = st.text_input(
+                    tr("Model Name"),
+                    value=llm_model_name,
+                    key=f"{llm_provider}_model_name_input",
+                    help=tr("Enter Ollama model name (e.g., qwen:7b, llama2:7b)")
+                )
+            
+            if st_llm_model_name:
+                config.app[f"{llm_provider}_model_name"] = st_llm_model_name
+            
+            # Model Memory Management (Ollama only)
+            st.divider()
+            st.write("**" + tr("Model Memory Management") + "**")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                keep_alive_minutes = st.number_input(
+                    tr("Keep Model in Memory (minutes)"),
+                    min_value=-1,
+                    max_value=120,
+                    value=config.app.get("ollama_keep_alive_minutes", 5),
+                    help=tr("How long to keep model loaded: -1=forever, 0=unload immediately, 5=default"),
+                    key="ollama_keep_alive"
+                )
+                config.app["ollama_keep_alive_minutes"] = keep_alive_minutes
+                
+                if keep_alive_minutes == -1:
+                    st.caption("♾️ " + tr("Model stays loaded indefinitely (fastest, uses more RAM)"))
+                elif keep_alive_minutes == 0:
+                    st.caption("⚡ " + tr("Model unloads immediately (saves RAM, slower startup)"))
+                else:
+                    st.caption(f"⏱️ Model stays loaded for {keep_alive_minutes} minutes")
+            
+            with col2:
+                force_unload = st.checkbox(
+                    tr("Force Unload After Generation"),
+                    value=config.app.get("ollama_unload_after_generate", False),
+                    help=tr("Immediately unload model after each generation (overrides keep-alive timer)"),
+                    key="ollama_force_unload"
+                )
+                config.app["ollama_unload_after_generate"] = force_unload
+                
+                if force_unload:
+                    st.warning("⚠️ " + tr("Model will unload after EVERY generation (slowest, minimum RAM)"))
+                else:
+                    st.info("💡 " + tr("Model stays loaded based on keep-alive timer (recommended)"))
+        else:
+            # Standard text input for other providers
+            st_llm_model_name = st.text_input(
+                tr("Model Name"),
+                value=llm_model_name,
+                key=f"{llm_provider}_model_name_input",
+                help=tr("Model identifier for this provider")
+            )
+            if st_llm_model_name:
+                config.app[f"{llm_provider}_model_name"] = st_llm_model_name
     else:
         # For ERNIE, show specialized fields
         st_ernie_account_id = st.text_input(
