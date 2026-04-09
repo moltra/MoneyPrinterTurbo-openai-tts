@@ -446,10 +446,8 @@ Generate a script for a video, depending on the subject of the video.
                     f"failed to generate video script, trying again... {i + 1}"
                 )
     finally:
-        if (
-            config.app.get("llm_provider", "openai") == "ollama"
-            and config.app.get("ollama_unload_after_generate", False)
-        ):
+        # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
+        if config.app.get("llm_provider", "openai") == "ollama":
             unload_ollama_model(config.app.get("ollama_model_name"))
     if "Error: " in final_script:
         logger.error(f"failed to generate video script: {final_script}")
@@ -521,10 +519,8 @@ Please note that you must use English for generating video search terms; Chinese
                     f"failed to generate video terms, trying again... {i + 1}"
                 )
     finally:
-        if (
-            config.app.get("llm_provider", "openai") == "ollama"
-            and config.app.get("ollama_unload_after_generate", False)
-        ):
+        # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
+        if config.app.get("llm_provider", "openai") == "ollama":
             unload_ollama_model(config.app.get("ollama_model_name"))
 
     logger.success(f"completed: \n{search_terms}")

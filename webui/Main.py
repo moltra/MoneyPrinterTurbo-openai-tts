@@ -222,7 +222,8 @@ def main():
     main_tabs = st.tabs([
         "🎬 " + tr("Create Video"),
         "📦 " + tr("Bulk Create"),
-        "📊 " + tr("Task Browser"),
+        "� " + tr("Script Library"),
+        "� " + tr("Task Browser"),
         "⚙️ " + tr("Config")
     ])
     
@@ -347,7 +348,21 @@ def main():
                                     
                                     st.session_state["sentence_keywords"] = sentence_keywords
                                 
+                                # Auto-save script to library
+                                from webui.components.script_library import auto_save_script
+                                script_id = auto_save_script(
+                                    subject=video_subject.strip(),
+                                    script=generated_script,
+                                    keywords=video_terms_list if isinstance(video_terms_list, list) else [],
+                                    language=config.ui.get("language", "en"),
+                                    paragraph_number=config.ui.get(ConfigKeys.PARAGRAPH_NUMBER, Defaults.PARAGRAPH_NUMBER)
+                                )
+                                if script_id:
+                                    st.session_state["current_script_id"] = script_id
+                                    logger.info(f"Auto-saved script: {script_id}")
+                                
                                 st.success("✅ " + tr("Script and keywords generated successfully!"))
+                                st.info("💾 " + tr("Script auto-saved to Script Library"))
                                 st.rerun()
                         except requests.exceptions.HTTPError as e:
                             st.error(f"❌ API Error: {e.response.status_code} - {e.response.text}")
@@ -502,6 +517,13 @@ def main():
                     task_id = task_data.get("task_id", "")
                     st.session_state[SessionKeys.CURRENT_TASK_ID] = task_id
                     
+                    # Link script to task if we have a script_id
+                    if "current_script_id" in st.session_state:
+                        from webui.components.script_library import link_script_to_task
+                        script_id = st.session_state["current_script_id"]
+                        if link_script_to_task(script_id, task_id):
+                            logger.info(f"Linked script {script_id} to task {task_id}")
+                    
                     # Show task details
                     with st.expander(tr("Task Details"), expanded=True):
                         st.json(task_data)
@@ -549,17 +571,23 @@ def main():
                 st.session_state[SessionKeys.BULK_FAILED] = failed
     
     # ========================================================================
-    # TAB 2: Task Browser
+    # TAB 2: Script Library
     # ========================================================================
     with main_tabs[2]:
-        st.subheader(tr("Task Browser"))
-        st.info(tr("Task browser implementation coming soon"))
-        st.caption(tr("Will include: search, filtering, pagination, task management"))
+        from webui.components.script_library import render_script_library
+        render_script_library()
     
     # ========================================================================
-    # TAB 3: Configuration
+    # TAB 3: Task Browser
     # ========================================================================
     with main_tabs[3]:
+        from webui.components.task_browser import render_task_browser
+        render_task_browser(_api_base_url(), _api_headers())
+    
+    # ========================================================================
+    # TAB 4: Configuration
+    # ========================================================================
+    with main_tabs[4]:
         st.markdown("### " + tr("Configuration"))
         st.caption(tr("Configure LLM providers and advanced settings"))
         st.divider()

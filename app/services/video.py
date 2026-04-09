@@ -161,14 +161,16 @@ def combine_videos(
     video_transition_mode: VideoTransitionMode = None,
     max_clip_duration: int = 5,
     threads: int = 2,
+    task_id: str = None,
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     audio_duration = audio_clip.duration
-    logger.info(f"audio duration: {audio_duration} seconds")
+    log_prefix = f"[Task: {task_id}] " if task_id else ""
+    logger.info(f"{log_prefix}audio duration: {audio_duration} seconds")
     # Required duration of each clip
     req_dur = audio_duration / len(video_paths)
     req_dur = max_clip_duration
-    logger.info(f"maximum clip duration: {req_dur} seconds")
+    logger.info(f"{log_prefix}maximum clip duration: {req_dur} seconds")
     output_dir = os.path.dirname(combined_video_path)
 
     selected_video_codec = _get_video_codec()
@@ -194,21 +196,22 @@ def combine_videos(
             if clip_duration - start_time >= max_clip_duration:
                 subclipped_items.append(SubClippedVideoClip(file_path= video_path, start_time=start_time, end_time=end_time, width=clip_w, height=clip_h))
             start_time = end_time    
-            if video_concat_mode.value == VideoConcatMode.sequential.value:
+            if video_concat_mode and video_concat_mode.value == VideoConcatMode.sequential.value:
                 break
 
     # random subclipped_items order
-    if video_concat_mode.value == VideoConcatMode.random.value:
+    if video_concat_mode and video_concat_mode.value == VideoConcatMode.random.value:
         random.shuffle(subclipped_items)
         
-    logger.debug(f"total subclipped items: {len(subclipped_items)}")
+    logger.debug(f"{log_prefix}total subclipped items: {len(subclipped_items)}")
     
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
     for i, subclipped_item in enumerate(subclipped_items):
         if video_duration > audio_duration:
             break
         
-        logger.debug(f"processing clip {i+1}: {subclipped_item.width}x{subclipped_item.height}, current duration: {video_duration:.2f}s, remaining: {audio_duration - video_duration:.2f}s")
+        clip_filename = os.path.basename(subclipped_item.file_path)
+        logger.debug(f"{log_prefix}processing clip {i+1}/{len(subclipped_items)}: {clip_filename} ({subclipped_item.width}x{subclipped_item.height}), current duration: {video_duration:.2f}s, remaining: {audio_duration - video_duration:.2f}s")
         
         try:
             clip = VideoFileClip(subclipped_item.file_path).subclipped(subclipped_item.start_time, subclipped_item.end_time)
@@ -236,7 +239,7 @@ def combine_videos(
                     clip = CompositeVideoClip([background, clip_resized])
                     
             shuffle_side = random.choice(["left", "right", "top", "bottom"])
-            if video_transition_mode.value == VideoTransitionMode.none.value:
+            if video_transition_mode is None or video_transition_mode.value == VideoTransitionMode.none.value:
                 clip = clip
             elif video_transition_mode.value == VideoTransitionMode.fade_in.value:
                 clip = video_effects.fadein_transition(clip, 1)
@@ -275,17 +278,21 @@ def combine_videos(
             video_duration += clip.duration
             
         except Exception as e:
-            logger.error(f"Failed to process clip {i+1}: {subclipped_item.file_path} - {str(e)}")
+            clip_filename = os.path.basename(subclipped_item.file_path)
+            logger.error(f"{log_prefix}Failed to process clip {i+1}/{len(subclipped_items)}: {clip_filename} - {str(e)}")
             failed_clips.append({
                 'index': i,
                 'path': subclipped_item.file_path,
+                'filename': clip_filename,
                 'error': str(e)
             })
     
     # Check if too many clips failed
     if failed_clips:
         failure_ratio = len(failed_clips) / len(subclipped_items) if subclipped_items else 0
-        logger.warning(f"Clip processing summary: {len(failed_clips)} failed out of {len(subclipped_items)} ({failure_ratio*100:.1f}%)")
+        logger.warning(f"{log_prefix}Clip processing summary: {len(failed_clips)} failed out of {len(subclipped_items)} ({failure_ratio*100:.1f}%)")
+        for failed in failed_clips:
+            logger.warning(f"{log_prefix}  - Clip {failed['index']+1}: {failed['filename']} - {failed['error']}")
         
         from app.models.video_constants import VideoConstants
         if failure_ratio > VideoConstants.MAX_CLIP_FAILURE_RATIO:
@@ -297,14 +304,14 @@ def combine_videos(
     
     # loop processed clips until the video duration matches or exceeds the audio duration.
     if video_duration < audio_duration:
-        logger.warning(f"video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
+        logger.warning(f"{log_prefix}video duration ({video_duration:.2f}s) is shorter than audio duration ({audio_duration:.2f}s), looping clips to match audio length.")
         base_clips = processed_clips.copy()
         for clip in itertools.cycle(base_clips):
             if video_duration >= audio_duration:
                 break
             processed_clips.append(clip)
             video_duration += clip.duration
-        logger.info(f"video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
+        logger.info(f"{log_prefix}video duration: {video_duration:.2f}s, audio duration: {audio_duration:.2f}s, looped {len(processed_clips)-len(base_clips)} clips")
      
     # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
     logger.info("starting clip merging process")

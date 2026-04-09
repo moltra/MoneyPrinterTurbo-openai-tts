@@ -14,7 +14,7 @@ from app.utils import utils
 
 
 def generate_script(task_id, params):
-    logger.info("\n\n## generating video script")
+    logger.info(f"[Task: {task_id}] \n\n## generating video script")
     video_script = params.video_script.strip()
     if not video_script:
         video_script = llm.generate_script(
@@ -23,18 +23,18 @@ def generate_script(task_id, params):
             paragraph_number=params.paragraph_number,
         )
     else:
-        logger.debug(f"video script: \n{video_script}")
+        logger.debug(f"[Task: {task_id}] video script: \n{video_script}")
 
     if not video_script:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        logger.error("failed to generate video script.")
+        logger.error(f"[Task: {task_id}] failed to generate video script.")
         return None
 
     return video_script
 
 
 def generate_terms(task_id, params, video_script):
-    logger.info("\n\n## generating video terms")
+    logger.info(f"[Task: {task_id}] \n\n## generating video terms")
     video_terms = params.video_terms
     if not video_terms:
         video_terms = llm.generate_terms(
@@ -48,11 +48,11 @@ def generate_terms(task_id, params, video_script):
         else:
             raise ValueError("video_terms must be a string or a list of strings.")
 
-        logger.debug(f"video terms: {utils.to_json(video_terms)}")
+        logger.debug(f"[Task: {task_id}] video terms: {utils.to_json(video_terms)}")
 
     if not video_terms:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        logger.error("failed to generate video terms.")
+        logger.error(f"[Task: {task_id}] failed to generate video terms.")
         return None
 
     return video_terms
@@ -72,7 +72,7 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def generate_sentence_terms(task_id, params, video_script):
-    logger.info("\n\n## generating sentence-level video terms")
+    logger.info(f"[Task: {task_id}] \n\n## generating sentence-level video terms")
     sentences = _split_sentences(video_script)
     max_sentences = int(config.ui.get("max_sentence_terms", 30) or 30)
     if max_sentences > 0:
@@ -313,6 +313,7 @@ def generate_final_videos(
             video_transition_mode=video_transition_mode,
             max_clip_duration=params.video_clip_duration,
             threads=params.n_threads,
+            task_id=task_id,
         )
 
         _progress += 50 / params.video_count / 2

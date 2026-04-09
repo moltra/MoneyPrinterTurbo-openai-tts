@@ -40,7 +40,7 @@ def create_video_task_with_validation(
     
     # Create task via API
     def _create_task():
-        create_url = f"{api_base_url}/api/v1/video/create"
+        create_url = f"{api_base_url}/api/v1/videos"
         response = requests.post(
             create_url,
             json=params.model_dump(),
@@ -57,7 +57,8 @@ def create_video_task_with_validation(
         show_spinner=True
     )
     
-    if result and result.get("code") == 0:
+    # API uses "status" field, not "code"
+    if result and result.get("status") == 200:
         task_data = result.get("data", {})
         task_id = task_data.get("task_id", "")
         
@@ -114,7 +115,7 @@ def create_bulk_tasks_with_progress(
         task_params.video_subject = topic
         
         # Create task
-        create_url = f"{api_base_url}/api/v1/video/create"
+        create_url = f"{api_base_url}/api/v1/videos"
         response = requests.post(
             create_url,
             json=task_params.model_dump(),
