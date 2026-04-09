@@ -269,10 +269,6 @@ def main():
         )
         st.session_state[SessionKeys.VIDEO_SUBJECT] = video_subject
         
-        # Show hint if subject is typed but button might seem disabled
-        if video_subject and video_subject.strip():
-            st.caption("✓ " + tr("Press Enter or click outside to activate Generate button"))
-        
         # Generate Script button (enabled if subject has content)
         col1, col2 = st.columns([1, 3])
         with col1:
