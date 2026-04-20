@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from typing import List
 from loguru import logger
+from app.utils.profiling import profile_function
 from moviepy import (
     AudioFileClip,
     ColorClip,
@@ -152,6 +153,7 @@ def get_bgm_file(bgm_type: str = "random", bgm_file: str = ""):
     return ""
 
 
+@profile_function(name="combine_videos", save_html=True, min_duration=1.0)
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],

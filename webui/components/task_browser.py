@@ -1,14 +1,15 @@
-"""
-Task Browser Component
-Provides UI for viewing, searching, and managing video generation tasks
-"""
+"""Task Browser Component for MoneyPrinterTurbo"""
 import streamlit as st
 import requests
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import List, Dict, Any, Optional
 from loguru import logger
-
 from webui.i18n import tr
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import time
+import orjson
+from pyinstrument import Profiler
+import os
 
 
 def render_task_browser(api_base_url: str, api_headers: dict):
@@ -175,19 +176,27 @@ def render_task_card(task: Dict[str, Any], api_base_url: str, api_headers: dict)
 
 
 def render_task_details(task_id: str, task: Dict[str, Any], api_base_url: str, api_headers: dict):
-    """Render detailed task information"""
+    """Render detailed task information with video player"""
     
     st.write(f"**{tr('Task ID')}:** `{task_id}`")
     
-    # Get full task details from API
-    try:
+    # Get full task details from API with retry
+    @retry(
+        retry=retry_if_exception_type((requests.RequestException, requests.Timeout)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5)
+    )
+    def fetch_task_details():
         response = requests.get(
             f"{api_base_url}/api/v1/tasks/{task_id}",
             headers=api_headers,
             timeout=10
         )
         response.raise_for_status()
-        result = response.json()
+        return response.json()
+    
+    try:
+        result = fetch_task_details()
         
         if result.get("status") == 200:
             full_task = result.get("data", {}).get("task", task)
@@ -212,13 +221,40 @@ def render_task_details(task_id: str, task: Dict[str, Any], api_base_url: str, a
                 else:
                     st.write(terms)
             
-            # Video files
+            # Video files with player
             if "combined_videos" in full_task:
                 st.write(f"**{tr('Generated Videos')}:**")
                 for idx, video_url in enumerate(full_task["combined_videos"], 1):
-                    st.write(f"{idx}. {video_url}")
-                    if st.button(tr("Download"), key=f"download_{task_id}_{idx}"):
-                        st.info(tr("Video download link") + f": {video_url}")
+                    # Fix Docker internal URL to browser-accessible URL
+                    if "moneyprinterturbo-dev-api:8080" in video_url:
+                        # Replace internal Docker hostname with actual API base URL
+                        browser_url = video_url.replace(
+                            "http://moneyprinterturbo-dev-api:8080",
+                            api_base_url
+                        )
+                    else:
+                        browser_url = video_url
+                    
+                    st.write(f"**{tr('Video')} {idx}:**")
+                    
+                    # Video player
+                    try:
+                        st.video(browser_url)
+                    except Exception as e:
+                        logger.warning(f"Video player failed, showing link: {e}")
+                        st.write(f"🎬 [{tr('Download Video')}]({browser_url})")
+                    
+                    # Download button
+                    col1, col2 = st.columns([3, 1])
+                    with col2:
+                        st.download_button(
+                            label=tr("Download"),
+                            data=browser_url,
+                            file_name=f"video_{task_id[:8]}_{idx}.mp4",
+                            mime="video/mp4",
+                            key=f"download_{task_id}_{idx}",
+                            use_container_width=True
+                        )
         
         else:
             st.warning(tr("Could not fetch full task details"))
@@ -231,10 +267,15 @@ def render_task_details(task_id: str, task: Dict[str, Any], api_base_url: str, a
 def render_task_parameters(params: Dict[str, Any]):
     """Render task parameters in a clean format"""
     
+    if not params:
+        st.warning(tr("No parameters available"))
+        return
+    
     # Core parameters
     st.write(f"**{tr('Video Settings')}:**")
     
     param_display = {
+        "video_subject": tr("Subject"),
         "video_aspect": tr("Aspect Ratio"),
         "video_concat_mode": tr("Concat Mode"),
         "video_clip_duration": tr("Clip Duration"),
@@ -243,9 +284,11 @@ def render_task_parameters(params: Dict[str, Any]):
         "video_source": tr("Video Source"),
     }
     
+    displayed_params = 0
     for key, label in param_display.items():
         if key in params:
             st.write(f"- **{label}:** {params[key]}")
+            displayed_params += 1
     
     # Voice settings
     if any(k.startswith("voice_") for k in params.keys()):
@@ -259,32 +302,142 @@ def render_task_parameters(params: Dict[str, Any]):
         for key, label in voice_params.items():
             if key in params:
                 st.write(f"- **{label}:** {params[key]}")
+                displayed_params += 1
     
-    # Show all params in JSON
-    with st.expander(tr("View Raw Parameters")):
-        st.json(params)
+    # BGM settings
+    if any(k.startswith("bgm_") for k in params.keys()):
+        st.write(f"\n**{tr('Background Music')}:**")
+        bgm_params = {
+            "bgm_type": tr("Type"),
+            "bgm_file": tr("File"),
+            "bgm_volume": tr("Volume"),
+        }
+        for key, label in bgm_params.items():
+            if key in params:
+                st.write(f"- **{label}:** {params[key]}")
+                displayed_params += 1
+    
+    # Subtitle settings  
+    if any(k.startswith("subtitle_") for k in params.keys()):
+        st.write(f"\n**{tr('Subtitles')}:**")
+        subtitle_params = {
+            "subtitle_enabled": tr("Enabled"),
+            "subtitle_position": tr("Position"),
+            "subtitle_font_size": tr("Font Size"),
+        }
+        for key, label in subtitle_params.items():
+            if key in params:
+                st.write(f"- **{label}:** {params[key]}")
+                displayed_params += 1
+    
+    # Show all params in JSON (use container instead of expander to avoid nesting)
+    st.divider()
+    st.caption(tr("Raw Parameters (JSON)"))
+    
+    if params:
+        # Use orjson for faster parsing (already imported at top)
+        try:
+            json_str = orjson.dumps(params, option=orjson.OPT_INDENT_2).decode('utf-8')
+            st.code(json_str, language="json")
+        except Exception:
+            # Fallback to regular JSON if orjson fails
+            st.json(params)
+    else:
+        st.warning(tr("Parameters object is empty. This may indicate the task was created with minimal data."))
 
 
 def render_task_logs(task_id: str, api_base_url: str, api_headers: dict):
     """
-    Render task-specific logs
-    
-    Note: This requires an API endpoint to fetch logs by task_id
-    For now, shows instructions for manual log viewing
+    Render task-specific logs with real-time streaming
     """
     
     st.write(f"**{tr('Task Logs')}:** `{task_id}`")
     
-    # Command to view logs
-    st.code(f"docker logs moneyprinterturbo-dev-api | grep '[Task: {task_id[:8]}]'", language="bash")
+    # Auto-refresh toggle
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        auto_refresh = st.checkbox(tr("Auto-refresh logs"), value=False, key=f"auto_refresh_{task_id}")
+    with col2:
+        if st.button(tr("Refresh Now"), key=f"refresh_logs_{task_id}", use_container_width=True):
+            st.rerun()
     
-    st.caption(tr("Log streaming from API coming soon"))
-    
-    # Placeholder for future log streaming
-    st.info(
-        tr("To view logs for this task, run the command above in your terminal.\n\n"
-           "Future enhancement: Real-time log streaming will be available here.")
+    # Try to fetch logs from API
+    @retry(
+        retry=retry_if_exception_type(requests.RequestException),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, min=1, max=3)
     )
+    def fetch_logs():
+        response = requests.get(
+            f"{api_base_url}/api/v1/tasks/{task_id}/logs",
+            headers=api_headers,
+            timeout=5
+        )
+        if response.status_code == 404:
+            return None  # Endpoint not implemented yet
+        response.raise_for_status()
+        return response.json()
+    
+    try:
+        log_data = fetch_logs()
+        
+        if log_data and log_data.get("status") == 200:
+            # Real-time log streaming
+            logs = log_data.get("data", {}).get("logs", [])
+            
+            if logs:
+                # Display logs in code block
+                log_text = "\n".join(logs)
+                st.code(log_text, language="log")
+                
+                # Show log count
+                st.caption(f"📊 {len(logs)} {tr('log entries')}")
+                
+                # Auto-refresh
+                if auto_refresh:
+                    time.sleep(3)
+                    st.rerun()
+            else:
+                st.info(tr("No logs available yet for this task"))
+        
+        else:
+            # Fallback: Show manual command
+            st.caption(tr("Real-time log endpoint not available. Use manual command:"))
+            st.code(
+                f"docker logs moneyprinterturbo-dev-api 2>&1 | grep '[Task: {task_id[:8]}]'",
+                language="bash"
+            )
+            
+            # Add helpful instructions
+            with st.expander(tr("📖 How to view logs manually")):
+                st.markdown(f"""
+                **{tr('Option 1: Docker logs with grep')}**
+                ```bash
+                docker logs -f moneyprinterturbo-dev-api 2>&1 | grep '[Task: {task_id[:8]}]'
+                ```
+                
+                **{tr('Option 2: View all recent logs')}**
+                ```bash
+                docker logs --tail 100 moneyprinterturbo-dev-api
+                ```
+                
+                **{tr('Option 3: Follow logs live')}**
+                ```bash
+                docker logs -f moneyprinterturbo-dev-api
+                ```
+                
+                **{tr('Tip')}:** {tr('Look for lines containing')} `[Task: {task_id[:8]}]`
+                """)
+    
+    except Exception as e:
+        # Silently fall back to manual instructions
+        logger.debug(f"Log streaming not available: {e}")
+        
+        st.caption(tr("📋 Manual log viewing:"))
+        st.code(
+            f"docker logs moneyprinterturbo-dev-api 2>&1 | grep '[Task: {task_id[:8]}]'",
+            language="bash"
+        )
 
 
 def render_task_actions(task_id: str, task: Dict[str, Any], api_base_url: str, api_headers: dict):

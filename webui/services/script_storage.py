@@ -313,9 +313,32 @@ class ScriptStorage:
 # Global instance
 _storage = None
 
-def get_script_storage() -> ScriptStorage:
-    """Get or create global script storage instance"""
+def get_script_storage():
+    """
+    Get or create global script storage instance
+    
+    SWITCHABLE BACKEND:
+    - Use SQLite for production (fast, scalable, FTS)
+    - Use JSON for development/testing (simple, debuggable)
+    """
     global _storage
     if _storage is None:
-        _storage = ScriptStorage()
+        # Import here to avoid circular dependencies
+        import os
+        
+        # Check environment variable or auto-detect
+        use_sqlite = os.getenv("USE_SQLITE_STORAGE", "true").lower() == "true"
+        
+        if use_sqlite:
+            try:
+                from webui.services.script_storage_sqlite import ScriptStorageSQLite
+                _storage = ScriptStorageSQLite()
+                logger.info("Using SQLite storage backend")
+            except ImportError as e:
+                logger.warning(f"Failed to import SQLite storage, falling back to JSON: {e}")
+                _storage = ScriptStorage()
+        else:
+            _storage = ScriptStorage()
+            logger.info("Using JSON file storage backend")
+    
     return _storage

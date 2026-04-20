@@ -20,8 +20,8 @@ RUN sed -i '/<policy domain="path" rights="none" pattern="@\*"/d' /etc/ImageMagi
 # Copy only the requirements.txt first to leverage Docker cache
 COPY requirements.txt ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with extended timeout and retries for large packages
+RUN pip install --no-cache-dir --timeout=600 --retries=5 -r requirements.txt
 
 # Now copy the rest of the codebase into the image
 COPY . .

@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletion
 
 from app.config import config
 from app.utils.logging import sanitize_log_data
+from app.utils.profiling import profile_function
 
 _max_retries = 5
 
@@ -375,6 +376,7 @@ def _generate_response(prompt: str) -> str:
         return f"Error: {str(e)}"
 
 
+@profile_function(name="generate_script", save_html=True, min_duration=0.5)
 def generate_script(
     video_subject: str, language: str = "", paragraph_number: int = 1
 ) -> str:
@@ -456,6 +458,7 @@ Generate a script for a video, depending on the subject of the video.
     return final_script.strip()
 
 
+@profile_function(name="generate_terms", save_html=True, min_duration=0.5)
 def generate_terms(video_subject: str, video_script: str, amount: int = 5) -> List[str]:
     prompt = f"""
 # Role: Video Search Terms Generator

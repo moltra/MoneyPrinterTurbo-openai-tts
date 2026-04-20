@@ -19,12 +19,13 @@ services:
       - ${MPT_REPO_DIR:-/mnt/data/repos/MoneyPrinterTurbo-openai-tts}:/MoneyPrinterTurbo
       - ${DOCKERDIR:-/opt/docker}/appdata/moneyprinterturbo-dev/config/config.toml:/MoneyPrinterTurbo/config.toml
       - /mnt/data/storage:/MoneyPrinterTurbo/storage
+      - moneyprinterturbo-cache:/root/.cache
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 20s
     deploy:
       resources:
         limits:
@@ -60,12 +61,13 @@ services:
       - ${MPT_REPO_DIR:-/mnt/data/repos/MoneyPrinterTurbo-openai-tts}:/MoneyPrinterTurbo
       - ${DOCKERDIR:-/opt/docker}/appdata/moneyprinterturbo-dev/config/config.toml:/MoneyPrinterTurbo/config.toml
       - /mnt/data/storage:/MoneyPrinterTurbo/storage
+      - moneyprinterturbo-cache:/root/.cache
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501').read()"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -78,3 +80,7 @@ services:
       moneyprinterturbo-dev-api:
         condition: service_healthy
     command: ["streamlit", "run", "./webui/Main.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.enableCORS=True", "--browser.gatherUsageStats=False"]
+
+volumes:
+  moneyprinterturbo-cache:
+    name: moneyprinterturbo-dev-cache
