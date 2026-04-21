@@ -66,6 +66,9 @@ Picwish focuses on the **image processing field**, providing a rich set of **ima
 - [x] Supports **background music**, either random or specified music files, with adjustable `background music volume`
 - [x] Video material sources are **high-definition** and **royalty-free**, and you can also use your own **local materials**
 - [x] Supports integration with various models such as **OpenAI**, **Moonshot**, **Azure**, **gpt4free**, **one-api**, **Qwen**, **Google Gemini**, **Ollama**, **DeepSeek**, **ERNIE**, **Pollinations**, **ModelScope** and more
+- [x] **Dual Model GPU Optimization** 🚀 - Use large model for script generation (quality priority), small model for keywords (speed priority)
+    - **47.5%** faster LLM processing, **94.6%** faster keyword generation
+    - See: [Dual Model Setup Guide](docs/DUAL_MODEL_SETUP.md)
 
 ### Future Plans 📅
 

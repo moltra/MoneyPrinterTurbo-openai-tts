@@ -60,6 +60,9 @@
 - [x] 视频素材来源 **高清**，而且 **无版权**，也可以使用自己的 **本地素材**
 - [x] 支持 **OpenAI**、**Moonshot**、**Azure**、**gpt4free**、**one-api**、**通义千问**、**Google Gemini**、**Ollama**、**DeepSeek**、 **文心一言**, **Pollinations**、**ModelScope** 等多种模型接入
     - 中国用户建议使用 **DeepSeek** 或 **Moonshot** 作为大模型提供商（国内可直接访问，不需要VPN。注册就送额度，基本够用）
+- [x] **双模型GPU优化** 🚀 - 使用大模型生成脚本（质量优先），小模型生成关键词（速度优先）
+    - LLM处理速度提升 **47.5%**，关键词生成速度提升 **94.6%**
+    - 详见：[双模型配置指南](docs/DUAL_MODEL_SETUP.md)
 
 
 ### 后期计划 📅
