@@ -1,0 +1,92 @@
+# Voice Configuration Example for MoneyPrinterTurbo
+# Copy relevant sections to your main config.toml
+
+[app]
+# ============================================
+# AUTO VOICE SELECTION
+# ============================================
+# Automatically selects the best voice based on video subject
+auto_voice_selection = true
+
+# Optional: Only auto-select when using these default voices
+# Leave empty or comment out to allow auto-selection for any voice
+# default_voice_names = ["Graham", "Pippa", "Expressive_Narrator"]
+
+# ============================================
+# LLM CONFIGURATION (for script generation)
+# ============================================
+llm_provider = "ollama"
+ollama_model_name = "qwen2.5:7b"  # Best for creative writing
+ollama_base_url = "http://host.docker.internal:11434/v1"
+
+# ============================================
+# TTS PROVIDER (if using AllTalk v2)
+# ============================================
+# Option 1: Use OpenAI-compatible endpoint (recommended for AllTalk)
+tts_provider = "openai_style"
+openai_tts_api_key = ""  # Leave empty for local AllTalk
+openai_base_url = "http://host.docker.internal:7851/v1"  # AllTalk endpoint
+openai_tts_model_name = "tts-1"
+
+# Option 2: Use edge-tts or azure (built-in options)
+# tts_provider = "edge"
+
+# ============================================
+# VOICE PROFILES MAPPING
+# ============================================
+# These map to your AllTalk v2 voice files or system voices
+
+# For Authoritative Content (History, Finance, Science)
+# Auto-selected for subjects containing: history, finance, science, documentary, true crime, politics
+# voice_name = "Graham" or "male_authoritative.wav"
+
+# For Tutorials (How-To, Education, Tech)
+# Auto-selected for: tutorial, how-to, lifestyle, cooking, diy, education, tech review
+# voice_name = "Pippa" or "female_friendly.wav"
+
+# For Storytelling (Motivation, Fiction, Drama)
+# Auto-selected for: story, motivation, fiction, drama, reddit, entertainment
+# voice_name = "Expressive_Narrator" or "narrator_expressive.wav"
+
+# For Business/News (Professional, Tech, Reviews)
+# Auto-selected for: business, news, technology, product review, analysis
+# voice_name = "Saanvi" or "female_professional.wav"
+
+# For Gaming/Commentary (Casual, Vlog, Comedy)
+# Auto-selected for: gaming, vlog, comedy, commentary, reaction
+# voice_name = "Casual_Male" or "male_casual.wav"
+
+# ============================================
+# VIDEO SOURCES
+# ============================================
+video_source = "pexels"
+pexels_api_keys = ["your-pexels-key-here"]
+
+# ============================================
+# EXAMPLE USE CASES
+# ============================================
+
+# Example 1: History Documentary
+# Subject: "The Fall of the Roman Empire"
+# Auto-selected voice: Authoritative Male (Graham)
+# Speed: 0.9x (slower, more authoritative)
+
+# Example 2: Cooking Tutorial
+# Subject: "How to Make Perfect Pasta"
+# Auto-selected voice: Friendly Female (Pippa)
+# Speed: 1.0x (clear, friendly)
+
+# Example 3: Motivational Story
+# Subject: "Overcoming Adversity: Inspiring Stories"
+# Auto-selected voice: Expressive Narrator
+# Speed: 1.0x (emotional range)
+
+# Example 4: Tech Review
+# Subject: "iPhone 16 Pro Review"
+# Auto-selected voice: Professional Female (Saanvi)
+# Speed: 1.05x (efficient, professional)
+
+# Example 5: Gaming Highlights
+# Subject: "Top 10 Gaming Fails 2026"
+# Auto-selected voice: Casual Male
+# Speed: 1.1x (fast-paced, conversational)

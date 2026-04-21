@@ -10,6 +10,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import llm, material, subtitle, video, voice
 from app.services import state as sm
+from app.services.voice_matcher import VoiceMatcher
 from app.utils import utils
 
 
@@ -21,6 +22,7 @@ def generate_script(task_id, params):
             video_subject=params.video_subject,
             language=params.video_language,
             paragraph_number=params.paragraph_number,
+            skip_unload=True,  # Keep model loaded for subsequent terms generation
         )
     else:
         logger.debug(f"[Task: {task_id}] video script: \n{video_script}")
@@ -38,7 +40,7 @@ def generate_terms(task_id, params, video_script):
     video_terms = params.video_terms
     if not video_terms:
         video_terms = llm.generate_terms(
-            video_subject=params.video_subject, video_script=video_script, amount=5
+            video_subject=params.video_subject, video_script=video_script, amount=5, skip_unload=True
         )
     else:
         if isinstance(video_terms, str):
@@ -81,7 +83,7 @@ def generate_sentence_terms(task_id, params, video_script):
     for s in sentences:
         try:
             generated = llm.generate_terms(
-                video_subject=params.video_subject, video_script=s, amount=1
+                video_subject=params.video_subject, video_script=s, amount=1, skip_unload=True
             )
             if isinstance(generated, list) and generated and isinstance(generated[0], str):
                 t = generated[0].strip()
@@ -359,6 +361,22 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
 
         if type(params.video_concat_mode) is str:
             params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
+        
+        # Auto-select voice based on subject if using default voice
+        auto_voice_enabled = config.app.get("auto_voice_selection", True)
+        if auto_voice_enabled and params.voice_name:
+            default_voices = config.app.get("default_voice_names", [])
+            # Only auto-select if using a default voice (not custom)
+            if not default_voices or params.voice_name in default_voices:
+                voice_profile = VoiceMatcher.match_voice_to_subject(
+                    subject=params.video_subject,
+                    keywords=params.video_terms if isinstance(params.video_terms, str) else ""
+                )
+                logger.info(f"Auto-selected voice profile: {voice_profile['profile_id']} ({voice_profile['voice_name']})")
+                params.voice_name = voice_profile["voice_name"]
+                # Apply voice rate from profile if not explicitly set
+                if not params.voice_rate or params.voice_rate == 1.0:
+                    params.voice_rate = voice_profile["speed"]
 
         # 1. Generate script
         video_script = generate_script(task_id, params)
@@ -395,6 +413,12 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
                 task_id, state=const.TASK_STATE_COMPLETE, progress=100, terms=video_terms
             )
             return {"script": video_script, "terms": video_terms}
+
+        # Unload Ollama model now that LLM tasks are complete
+        if config.app.get("llm_provider", "openai") == "ollama":
+            from app.services.llm import unload_ollama_model
+            unload_ollama_model(config.app.get("ollama_model_name"))
+            logger.info("Ollama model unloaded after LLM tasks completion")
 
         sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20)
 

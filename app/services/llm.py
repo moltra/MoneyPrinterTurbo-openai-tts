@@ -26,6 +26,67 @@ def _ollama_api_generate_endpoint() -> str:
     return f"{base_url}/api/generate"
 
 
+def check_ollama_model_loaded(model_name: str) -> bool:
+    """
+    Check if an Ollama model is currently loaded in memory.
+    Returns True if loaded, False otherwise.
+    """
+    if not model_name:
+        return False
+    try:
+        base_url = config.app.get("ollama_base_url", "http://localhost:11434/v1")
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+        
+        # Use /api/ps endpoint to check running models
+        url = f"{base_url}/api/ps"
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            models = data.get("models", [])
+            for model in models:
+                if model.get("name") == model_name or model.get("model") == model_name:
+                    logger.info(f"Model {model_name} is already loaded")
+                    return True
+        
+        logger.info(f"Model {model_name} is not loaded")
+        return False
+    except Exception as e:
+        logger.debug(f"Failed to check model status: {e}")
+        return False
+
+
+def warmup_ollama_model(model_name: str) -> None:
+    """
+    Warm up (preload) an Ollama model with a simple prompt.
+    This ensures the model is loaded before actual generation.
+    """
+    if not model_name:
+        return
+    try:
+        logger.info(f"Warming up model: {model_name}...")
+        url = _ollama_api_generate_endpoint()
+        
+        # Send a minimal prompt to load the model
+        response = requests.post(
+            url,
+            json={
+                "model": model_name,
+                "prompt": "Hi",
+                "stream": False,
+            },
+            timeout=60,  # Extended timeout for model loading
+        )
+        
+        if response.status_code == 200:
+            logger.success(f"Model {model_name} loaded successfully")
+        else:
+            logger.warning(f"Model warmup returned status {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Model warmup failed: {e}")
+
+
 def unload_ollama_model(model_name: str) -> None:
     """
     Unload Ollama model from memory.
@@ -378,7 +439,7 @@ def _generate_response(prompt: str) -> str:
 
 @profile_function(name="generate_script", save_html=True, min_duration=0.5)
 def generate_script(
-    video_subject: str, language: str = "", paragraph_number: int = 1
+    video_subject: str, language: str = "", paragraph_number: int = 1, skip_unload: bool = False
 ) -> str:
     prompt = f"""
 # Role: Video Script Generator
@@ -426,6 +487,13 @@ Generate a script for a video, depending on the subject of the video.
         return "\n\n".join(paragraphs)
 
     try:
+        # For Ollama, check if model is loaded and warm it up if needed
+        if config.app.get("llm_provider", "openai") == "ollama":
+            model_name = config.app.get("ollama_model_name")
+            if not check_ollama_model_loaded(model_name):
+                logger.info(f"Model {model_name} not loaded, warming up (this may take 20-40 seconds)...")
+                warmup_ollama_model(model_name)
+        
         for i in range(_max_retries):
             try:
                 response = _generate_response(prompt=prompt)
@@ -449,7 +517,7 @@ Generate a script for a video, depending on the subject of the video.
                 )
     finally:
         # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
-        if config.app.get("llm_provider", "openai") == "ollama":
+        if not skip_unload and config.app.get("llm_provider", "openai") == "ollama":
             unload_ollama_model(config.app.get("ollama_model_name"))
     if "Error: " in final_script:
         logger.error(f"failed to generate video script: {final_script}")
@@ -459,7 +527,7 @@ Generate a script for a video, depending on the subject of the video.
 
 
 @profile_function(name="generate_terms", save_html=True, min_duration=0.5)
-def generate_terms(video_subject: str, video_script: str, amount: int = 5) -> List[str]:
+def generate_terms(video_subject: str, video_script: str, amount: int = 5, skip_unload: bool = False) -> List[str]:
     prompt = f"""
 # Role: Video Search Terms Generator
 
@@ -491,6 +559,13 @@ Please note that you must use English for generating video search terms; Chinese
     search_terms = []
     response = ""
     try:
+        # For Ollama, check if model is loaded and warm it up if needed
+        if config.app.get("llm_provider", "openai") == "ollama":
+            model_name = config.app.get("ollama_model_name")
+            if not check_ollama_model_loaded(model_name):
+                logger.info(f"Model {model_name} not loaded, warming up (this may take 20-40 seconds)...")
+                warmup_ollama_model(model_name)
+        
         for i in range(_max_retries):
             try:
                 response = _generate_response(prompt)
@@ -523,7 +598,7 @@ Please note that you must use English for generating video search terms; Chinese
                 )
     finally:
         # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
-        if config.app.get("llm_provider", "openai") == "ollama":
+        if not skip_unload and config.app.get("llm_provider", "openai") == "ollama":
             unload_ollama_model(config.app.get("ollama_model_name"))
 
     logger.success(f"completed: \n{search_terms}")

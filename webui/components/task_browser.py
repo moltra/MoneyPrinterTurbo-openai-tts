@@ -383,15 +383,20 @@ def render_task_logs(task_id: str, api_base_url: str, api_headers: dict):
         
         if log_data and log_data.get("status") == 200:
             # Real-time log streaming
-            logs = log_data.get("data", {}).get("logs", [])
+            logs = log_data.get("data", {}).get("logs", "")
             
             if logs:
-                # Display logs in code block
-                log_text = "\n".join(logs)
+                # Display logs in code block (logs is a string, not array)
+                if isinstance(logs, list):
+                    log_text = "\n".join(logs)
+                else:
+                    log_text = logs
+                
                 st.code(log_text, language="log")
                 
-                # Show log count
-                st.caption(f"📊 {len(logs)} {tr('log entries')}")
+                # Show log count (count lines)
+                log_lines = log_text.strip().split("\n")
+                st.caption(f"📊 {len(log_lines)} {tr('log entries')}")
                 
                 # Auto-refresh
                 if auto_refresh:

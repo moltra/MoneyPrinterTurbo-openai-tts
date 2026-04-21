@@ -45,7 +45,7 @@ def create_video_task_with_validation(
             create_url,
             json=params.model_dump(),
             headers=api_headers,
-            timeout=60
+            timeout=120  # Extended for Ollama model loading
         )
         response.raise_for_status()
         return response.json()
@@ -120,7 +120,7 @@ def create_bulk_tasks_with_progress(
             create_url,
             json=task_params.model_dump(),
             headers=api_headers,
-            timeout=60
+            timeout=120  # Extended for Ollama model loading
         )
         response.raise_for_status()
         result = response.json()

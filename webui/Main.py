@@ -318,35 +318,9 @@ def main():
                                     generated_terms = ", ".join(video_terms_list) if isinstance(video_terms_list, list) else str(video_terms_list)
                                     st.session_state["generated_terms"] = generated_terms
                                 
-                                # Step 3: Generate sentence-level keywords
-                                with st.spinner(tr("Generating keywords for each sentence...")):
-                                    import re
-                                    sentences = re.split(r'[.!?]+\s+', generated_script.strip())
-                                    sentences = [s.strip() for s in sentences if s.strip()]
-                                    
-                                    sentence_keywords = {}
-                                    for idx, sentence in enumerate(sentences):
-                                        # Generate keywords for this specific sentence
-                                        try:
-                                            sent_terms_response = requests.post(
-                                                f"{_api_base_url()}/api/v1/terms",
-                                                json={
-                                                    "video_subject": sentence[:50],  # First 50 chars as subject
-                                                    "video_script": sentence,
-                                                    "amount": 5  # 3-5 keywords per sentence
-                                                },
-                                                headers=_api_headers(),
-                                                timeout=60
-                                            )
-                                            sent_terms_response.raise_for_status()
-                                            sent_data = sent_terms_response.json()
-                                            sent_terms_list = sent_data.get("data", {}).get("video_terms", [])
-                                            sentence_keywords[idx] = ", ".join(sent_terms_list) if isinstance(sent_terms_list, list) else ""
-                                        except Exception as e:
-                                            logger.warning(f"Failed to generate keywords for sentence {idx}: {e}")
-                                            sentence_keywords[idx] = ""
-                                    
-                                    st.session_state["sentence_keywords"] = sentence_keywords
+                                # Initialize empty sentence keywords (user can generate manually later)
+                                if "sentence_keywords" not in st.session_state:
+                                    st.session_state["sentence_keywords"] = {}
                                 
                                 # Auto-save script to library
                                 from webui.components.script_library import auto_save_script
@@ -428,6 +402,39 @@ def main():
                 if "sentence_keywords" not in st.session_state:
                     st.session_state["sentence_keywords"] = {}
                 
+                # Add manual keyword generation button
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.caption(f"📝 {len(sentences)} sentences detected")
+                with col2:
+                    if st.button("🔄 Generate All Keywords", use_container_width=True, type="primary"):
+                        with st.spinner(tr("Generating keywords for each sentence...")):
+                            for idx, sentence in enumerate(sentences):
+                                # Use edited sentence if available
+                                current_sentence = st.session_state.get(f"sentence_{idx}", sentence)
+                                try:
+                                    sent_terms_response = requests.post(
+                                        f"{_api_base_url()}/api/v1/terms",
+                                        json={
+                                            "video_subject": current_sentence[:50],
+                                            "video_script": current_sentence,
+                                            "amount": 5
+                                        },
+                                        headers=_api_headers(),
+                                        timeout=120
+                                    )
+                                    sent_terms_response.raise_for_status()
+                                    sent_data = sent_terms_response.json()
+                                    sent_terms_list = sent_data.get("data", {}).get("video_terms", [])
+                                    st.session_state["sentence_keywords"][idx] = ", ".join(sent_terms_list) if isinstance(sent_terms_list, list) else ""
+                                except Exception as e:
+                                    logger.warning(f"Failed to generate keywords for sentence {idx}: {e}")
+                                    st.session_state["sentence_keywords"][idx] = ""
+                            st.success("✅ Keywords generated for all sentences!")
+                            st.rerun()
+                
+                st.divider()
+                
                 # Display each sentence with editable keywords
                 for idx, sentence in enumerate(sentences):
                     with st.expander(f"📌 Sentence {idx + 1}", expanded=idx < 3):
@@ -440,16 +447,46 @@ def main():
                             label_visibility="collapsed"
                         )
                         
-                        # Keywords for this sentence
-                        default_keywords = st.session_state["sentence_keywords"].get(idx, "")
-                        sentence_keywords = st.text_input(
-                            tr("Keywords for this sentence"),
-                            value=default_keywords,
-                            placeholder=tr("e.g., home renovation, tools, construction"),
-                            key=f"keywords_{idx}",
-                            help=tr("Specific keywords for finding clips for this sentence")
-                        )
-                        st.session_state["sentence_keywords"][idx] = sentence_keywords
+                        # Keywords for this sentence with regenerate button
+                        kw_col1, kw_col2 = st.columns([4, 1])
+                        with kw_col1:
+                            default_keywords = st.session_state["sentence_keywords"].get(idx, "")
+                            sentence_keywords = st.text_input(
+                                tr("Keywords for this sentence"),
+                                value=default_keywords,
+                                placeholder=tr("e.g., home renovation, tools, construction"),
+                                key=f"keywords_{idx}",
+                                help=tr("Specific keywords for finding clips for this sentence")
+                            )
+                            st.session_state["sentence_keywords"][idx] = sentence_keywords
+                        with kw_col2:
+                            if st.button("🔄", key=f"regen_{idx}", help="Regenerate keywords for this sentence"):
+                                st.session_state[f"regen_trigger_{idx}"] = True
+                                st.rerun()
+                        
+                        # Handle regeneration trigger
+                        if st.session_state.get(f"regen_trigger_{idx}", False):
+                            st.session_state[f"regen_trigger_{idx}"] = False
+                            try:
+                                import requests as req
+                                with st.spinner(f"Generating keywords for sentence {idx + 1}..."):
+                                    sent_terms_response = req.post(
+                                        f"{_api_base_url()}/api/v1/terms",
+                                        json={
+                                            "video_subject": edited_sentence[:50],
+                                            "video_script": edited_sentence,
+                                            "amount": 5
+                                        },
+                                        headers=_api_headers(),
+                                        timeout=120
+                                    )
+                                    sent_terms_response.raise_for_status()
+                                    sent_data = sent_terms_response.json()
+                                    sent_terms_list = sent_data.get("data", {}).get("video_terms", [])
+                                    st.session_state["sentence_keywords"][idx] = ", ".join(sent_terms_list) if isinstance(sent_terms_list, list) else ""
+                                    st.success(f"✅ Keywords regenerated for sentence {idx + 1}")
+                            except Exception as e:
+                                st.error(f"❌ Failed: {str(e)}")
                         
                         # Show character/word count
                         col1, col2, col3 = st.columns(3)

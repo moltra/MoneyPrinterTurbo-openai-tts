@@ -170,6 +170,35 @@ def get_task(
     )
 
 
+@router.get(
+    "/tasks/{task_id}/logs",
+    summary="Get task generation logs",
+)
+def get_task_logs(request: Request, task_id: str = Path(..., description="Task ID")):
+    """Get logs for a specific task"""
+    request_id = base.get_task_id(request)
+    task = sm.state.get_task(task_id)
+    
+    if not task:
+        raise HttpException(
+            task_id=task_id, status_code=404, message=f"{request_id}: task not found"
+        )
+    
+    tasks_dir = utils.task_dir()
+    log_file = os.path.join(tasks_dir, task_id, "generation.log")
+    
+    if not os.path.exists(log_file):
+        return utils.get_response(200, {"logs": "No logs available yet. Task may not have started."})
+    
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            logs = f.read()
+        return utils.get_response(200, {"logs": logs})
+    except Exception as e:
+        logger.error(f"Failed to read log file: {e}")
+        return utils.get_response(500, {"logs": f"Error reading logs: {str(e)}"})
+
+
 @router.delete(
     "/tasks/{task_id}",
     response_model=TaskDeletionResponse,
