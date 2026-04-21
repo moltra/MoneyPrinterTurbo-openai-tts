@@ -632,6 +632,7 @@ def main():
         # Configuration sub-tabs
         config_tabs = st.tabs([
             tr("LLM Provider"),
+            tr("TTS Provider"),
             tr("Video API Keys"),
             tr("Advanced Settings")
         ])
@@ -641,13 +642,18 @@ def main():
             render_llm_config()
         
         with config_tabs[1]:
+            # TTS Provider configuration
+            from webui.components.tts_provider_config import render_tts_provider_section
+            render_tts_provider_section()
+        
+        with config_tabs[2]:
             # Video source API key management
             st.write(tr("Video Source API Keys"))
             st.caption(tr("Manage API keys for Pexels and Pixabay"))
             st.divider()
             render_video_api_key_management()
         
-        with config_tabs[2]:
+        with config_tabs[3]:
             # Advanced settings
             st.write(tr("Advanced Settings"))
             st.caption(tr("These settings are for advanced users"))
