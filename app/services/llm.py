@@ -123,7 +123,35 @@ def unload_ollama_model(model_name: str) -> None:
         logger.warning(f"ollama model keep_alive update failed: {e}")
 
 
-def _generate_response(prompt: str) -> str:
+def _get_ollama_model(task_type: str = "general") -> str:
+    """
+    Get the appropriate Ollama model based on task type.
+    
+    Args:
+        task_type: "script", "keywords", or "general"
+        
+    Returns:
+        Model name to use
+    """
+    if config.app.get("llm_provider", "openai") != "ollama":
+        return ""
+    
+    # Check if dual model feature is enabled
+    use_keyword_model = config.app.get("ollama_use_keyword_model", False)
+    
+    if task_type == "keywords" and use_keyword_model:
+        keyword_model = config.app.get("ollama_keyword_model", "")
+        if keyword_model:
+            logger.debug(f"Using keyword model: {keyword_model}")
+            return keyword_model
+    
+    # Default to primary model
+    primary_model = config.app.get("ollama_model_name", "")
+    logger.debug(f"Using primary model: {primary_model}")
+    return primary_model
+
+
+def _generate_response(prompt: str, task_type: str = "general") -> str:
     try:
         content = ""
         llm_provider = config.app.get("llm_provider", "openai")
@@ -145,7 +173,17 @@ def _generate_response(prompt: str) -> str:
             elif llm_provider == "ollama":
                 # api_key = config.app.get("openai_api_key")
                 api_key = "ollama"  # any string works but you are required to have one
-                model_name = config.app.get("ollama_model_name")
+                
+                # Get appropriate model based on task type
+                model_name = _get_ollama_model(task_type)
+                if not model_name:
+                    model_name = config.app.get("ollama_model_name")
+                
+                # Warmup check - use the selected model
+                if not check_ollama_model_loaded(model_name):
+                    logger.info(f"Model {model_name} not loaded, warming up...")
+                    warmup_ollama_model(model_name)
+                
                 base_url = config.app.get("ollama_base_url", "")
                 if not base_url:
                     base_url = "http://localhost:11434/v1"
@@ -487,16 +525,9 @@ Generate a script for a video, depending on the subject of the video.
         return "\n\n".join(paragraphs)
 
     try:
-        # For Ollama, check if model is loaded and warm it up if needed
-        if config.app.get("llm_provider", "openai") == "ollama":
-            model_name = config.app.get("ollama_model_name")
-            if not check_ollama_model_loaded(model_name):
-                logger.info(f"Model {model_name} not loaded, warming up (this may take 20-40 seconds)...")
-                warmup_ollama_model(model_name)
-        
         for i in range(_max_retries):
             try:
-                response = _generate_response(prompt=prompt)
+                response = _generate_response(prompt=prompt, task_type="script")
                 if response:
                     final_script = format_response(response)
                 else:
@@ -518,7 +549,8 @@ Generate a script for a video, depending on the subject of the video.
     finally:
         # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
         if not skip_unload and config.app.get("llm_provider", "openai") == "ollama":
-            unload_ollama_model(config.app.get("ollama_model_name"))
+            model_name = _get_ollama_model("script")
+            unload_ollama_model(model_name)
     if "Error: " in final_script:
         logger.error(f"failed to generate video script: {final_script}")
     else:
@@ -559,16 +591,9 @@ Please note that you must use English for generating video search terms; Chinese
     search_terms = []
     response = ""
     try:
-        # For Ollama, check if model is loaded and warm it up if needed
-        if config.app.get("llm_provider", "openai") == "ollama":
-            model_name = config.app.get("ollama_model_name")
-            if not check_ollama_model_loaded(model_name):
-                logger.info(f"Model {model_name} not loaded, warming up (this may take 20-40 seconds)...")
-                warmup_ollama_model(model_name)
-        
         for i in range(_max_retries):
             try:
-                response = _generate_response(prompt)
+                response = _generate_response(prompt, task_type="keywords")
                 if "Error: " in response:
                     logger.error(f"failed to generate video script: {response}")
                     return response
@@ -599,7 +624,8 @@ Please note that you must use English for generating video search terms; Chinese
     finally:
         # Always set keep-alive for Ollama to override OLLAMA_KEEP_ALIVE env var
         if not skip_unload and config.app.get("llm_provider", "openai") == "ollama":
-            unload_ollama_model(config.app.get("ollama_model_name"))
+            model_name = _get_ollama_model("keywords")
+            unload_ollama_model(model_name)
 
     logger.success(f"completed: \n{search_terms}")
     return search_terms

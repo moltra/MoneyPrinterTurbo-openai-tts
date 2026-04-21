@@ -57,6 +57,14 @@ pollinations_model_name = "openai-fast"
 ollama_base_url = ""
 # Check your available models at https://ollama.com/library
 ollama_model_name = ""
+
+# Dual Model Strategy (GPU Optimization)
+# Use a smaller model for keyword generation to save VRAM and improve speed
+# Recommended: gemma:2b (1.4GB) for keywords, gemma4:e4b (9.6GB) for scripts
+# This provides ~50% faster keyword generation with minimal quality impact
+ollama_keyword_model = ""  # e.g., "gemma:2b" - leave empty to use ollama_model_name
+ollama_use_keyword_model = false  # Set to true to enable dual model feature
+
 # How long to keep model in memory after generation (in minutes)
 # 0 = unload immediately, 5 = keep for 5 minutes (default), -1 = keep forever
 ollama_keep_alive_minutes = 5
